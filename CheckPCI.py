@@ -1,5 +1,5 @@
 import os, sys, binascii, argparse
-from Scripts import ioreg, run
+from Scripts import ioreg
 
 class CheckPCI:
     def __init__(self):
@@ -7,10 +7,7 @@ class CheckPCI:
         if not sys.platform.lower() == "darwin":
             print("This script can only be run on macOS!")
             exit(1)
-        self.r = run.Run()
         self.i = ioreg.IOReg()
-        self.log = ""
-        self.ioreg = None
 
     def main(self, device_name=None):
         if device_name is not None and not isinstance(device_name,str):
