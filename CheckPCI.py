@@ -16,17 +16,8 @@ class CheckPCI:
         if device_name is not None and not isinstance(device_name,str):
             device_name = str(device_name)
         all_devs = self.i.get_all_devices()
-        # Add the header and separator
-        dev_list = [
-            "{} {} {} {} ACPI+DevicePaths".format(
-                "PCIDBG".ljust(7),
-                "VEN/DEV".ljust(9),
-                "Built-In".ljust(8),
-                "Bridged".ljust(7)
-            )
-        ]
-        dev_list.append("-"*len(dev_list[0]))
-        for p in sorted(all_devs.values(),key=lambda x:x.get("device_path")):
+        dev_list = []
+        for p in all_devs.values():
             p_dict = p.get("info",{})
             ven = p_dict.get("vendor-id")
             dev = p_dict.get("device-id")
@@ -78,6 +69,14 @@ class CheckPCI:
             else:
                 print("No device matching '{}' was found!".format(device_name))
             exit(1)
+        # Add the header and separator
+        dev_header = "{} {} {} {} ACPI+DevicePaths".format(
+            "PCIDBG".ljust(7),
+            "VEN/DEV".ljust(9),
+            "Built-In".ljust(8),
+            "Bridged".ljust(7)
+        )
+        dev_list = [dev_header,"-"*len(dev_header)]+sorted(dev_list)
         print("\n".join(dev_list))
 
 if __name__ == '__main__':
