@@ -34,7 +34,7 @@ class CheckPCI:
             except Exception as e:
                 print(e)
                 pass
-            if "built-in" in p_dict or "IOBuiltIn" in p_dict:
+            if "built-in" in p_dict or "IOBuiltin" in p_dict:
                 builtin = "YES"
             if "pcidebug" in p_dict:
                 # Try to organize it the same way gfxutil does
