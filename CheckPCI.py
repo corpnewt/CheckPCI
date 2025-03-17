@@ -1,41 +1,16 @@
 import os, sys, binascii, argparse
-from Scripts import ioreg, run, utils
+from Scripts import ioreg, run
 
 class CheckPCI:
     def __init__(self):
-        self.u = utils.Utils("CheckPCI")
         # Verify running OS
         if not sys.platform.lower() == "darwin":
-            self.u.head("Wrong OS!")
-            print("")
             print("This script can only be run on macOS!")
-            print("")
-            self.u.grab("Press [enter] to exit...")
             exit(1)
         self.r = run.Run()
         self.i = ioreg.IOReg()
         self.log = ""
         self.ioreg = None
-
-    def get_boot_args(self):
-        # Attempts to pull the boot-args from nvram
-        out = self.r.run({"args":["nvram","-p"]})
-        for l in out[0].split("\n"):
-            if "boot-args" in l:
-                return "\t".join(l.split("\t")[1:])
-        return None
-
-    def get_os_version(self):
-        # Scrape sw_vers
-        prod_name  = self.r.run({"args":["sw_vers","-productName"]})[0].strip()
-        prod_vers  = self.r.run({"args":["sw_vers","-productVersion"]})[0].strip()
-        build_vers = self.r.run({"args":["sw_vers","-buildVersion"]})[0].strip()
-        if build_vers: build_vers = "({})".format(build_vers)
-        return " ".join([x for x in (prod_name,prod_vers,build_vers) if x])
-
-    def lprint(self, message):
-        print(message)
-        self.log += message + "\n"
 
     def main(self, device_name=None):
         if device_name is not None and not isinstance(device_name,str):
