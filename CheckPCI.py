@@ -58,7 +58,7 @@ class CheckPCI:
                 p.get("acpi_path","Unknown APCI Path"),
                 p.get("device_path","Unknown Device Path")
             ))
-        if len(dev_list) == 2:
+        if not dev_list:
             # Nothing was returned - adjust output based on
             # whether or not we're searching
             if device_name is None:
