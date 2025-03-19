@@ -1,5 +1,5 @@
 import os, sys, binascii, argparse
-from Scripts import ioreg
+from Scripts import ioreg, utils
 
 class CheckPCI:
     def __init__(self):
@@ -7,6 +7,7 @@ class CheckPCI:
         if not sys.platform.lower() == "darwin":
             print("This script can only be run on macOS!")
             exit(1)
+        self.u = utils.Utils("CheckPCI")
         self.i = ioreg.IOReg()
 
     def main(self, device_name=None):
@@ -80,7 +81,24 @@ if __name__ == '__main__':
     # Setup the cli args
     parser = argparse.ArgumentParser(prog="CheckPCI.py", description="CheckPCI - a py script to list PCI device info from the IODeviceTree.")
     parser.add_argument("-f", "--find-name", help="find device paths for objects with the passed name from the IODeviceTree")
+    parser.add_argument("-i", "--local-ioreg", help="path to local ioreg dump to leverage")
     args = parser.parse_args()
     # Create our object and run our main function
     a = CheckPCI()
+    if args.local_ioreg:
+        ioreg_path = a.u.check_path(args.local_ioreg)
+        if not ioreg_path:
+            print("'{}' does not exist!".format(args.local_ioreg))
+            exit(1)
+        elif not os.path.isfile(ioreg_path):
+            print("'{}' is not a file!".format(args.local_ioreg))
+            exit(1)
+        # Try loading it
+        try:
+            with open(ioreg_path,"rb") as f:
+                a.i.ioreg["IOService"] = f.read().decode(errors="ignore").split("\n")
+        except Exception as e:
+            print("Failed to read '{}': {}".format(args.local_ioreg,e))
+            exit(1)
+        print("Using local ioreg: {}".format(ioreg_path))
     a.main(device_name=args.find_name)
