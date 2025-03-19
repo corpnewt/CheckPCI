@@ -70,7 +70,7 @@ class CheckPCI:
         # Add the header and separator
         dev_header = "{} {} {} {} ACPI+DevicePaths".format(
             "PCIDBG".ljust(7),
-            "VEN/DEV".ljust(9),
+            "VEN:DEV".ljust(9),
             "Built-In".ljust(8),
             "Bridged".ljust(7)
         )
