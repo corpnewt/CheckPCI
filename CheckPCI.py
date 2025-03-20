@@ -122,8 +122,8 @@ class CheckPCI:
 
 if __name__ == '__main__':
     # Create our object to get values for the help output
-    a = CheckPCI()
-    available = ", ".join("{} - {}".format(i,x[0]) for i,x in enumerate(a.default_columns,start=1))
+    p = CheckPCI()
+    available = ", ".join("{} - {}".format(i,x[0]) for i,x in enumerate(p.default_columns,start=1))
     # Setup the cli args
     parser = argparse.ArgumentParser(prog="CheckPCI.py", description="CheckPCI - a py script to list PCI device info from the IODeviceTree.")
     parser.add_argument("-f", "--find-name", help="find device paths for objects with the passed name from the IODeviceTree")
@@ -131,7 +131,7 @@ if __name__ == '__main__':
     parser.add_argument("-c", "--column-list", help="comma delimited list of numbers representing which columns to display.  Options are:\n{}".format(available))
     args = parser.parse_args()
     if args.local_ioreg:
-        ioreg_path = a.u.check_path(args.local_ioreg)
+        ioreg_path = p.u.check_path(args.local_ioreg)
         if not ioreg_path:
             print("'{}' does not exist!".format(args.local_ioreg))
             exit(1)
@@ -141,7 +141,7 @@ if __name__ == '__main__':
         # Try loading it
         try:
             with open(ioreg_path,"rb") as f:
-                a.i.ioreg["IOService"] = f.read().decode(errors="ignore").split("\n")
+                p.i.ioreg["IOService"] = f.read().decode(errors="ignore").split("\n")
         except Exception as e:
             print("Failed to read '{}': {}".format(args.local_ioreg,e))
             exit(1)
@@ -150,12 +150,22 @@ if __name__ == '__main__':
     if args.column_list:
         # Ensure we have values that are valid
         columns = []
-        _max = len(a.default_columns)
+        _max = len(p.default_columns)
         for x in args.column_list.split(","):
             try:
-                c = int(x.strip())
-                assert 0 < c <= _max
-                columns.append(c)
+                if "-" in x:
+                    a,b = map(int,x.strip().split("-"))
+                    assert 0 < a <= _max
+                    assert 0 < b <= _max
+                    a,b = min(a,b),max(a,b)
+                    for c in range(a,b+1):
+                        if not c in columns:
+                            columns.append(c)
+                else:
+                    c = int(x.strip())
+                    assert 0 < c <= _max
+                    if not c in columns:
+                        columns.append(c)
             except:
                 pass
         if not columns:
@@ -163,4 +173,4 @@ if __name__ == '__main__':
             print("1-{} corresponding to the following:".format(_max))
             print(available)
             exit(1)
-    a.main(device_name=args.find_name,columns=columns)
+    p.main(device_name=args.find_name,columns=columns)
