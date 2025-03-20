@@ -111,6 +111,9 @@ class CheckPCI:
         for i in sorted(display_columns):
             _head,_adj = self.default_columns[i]
             header_list.append(_head.ljust(_adj))
+        # Join "ACPI" and "Device" with a "+"
+        if header_list[-2:] == ["ACPI","Device"]:
+            header_list = header_list[:-2]+["ACPI+Device"]
         dev_header = " ".join(header_list)
         if dev_header.endswith(("ACPI","Device")):
             dev_header += " Paths"
