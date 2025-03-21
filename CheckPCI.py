@@ -292,7 +292,7 @@ class CheckPCI:
                     continue # No match
             # Parse the info based on our columns
             row = self.get_row(
-                row if include_names else row[:-1],
+                row if sys.platform.lower()=="darwin" or include_names else row[:-1],
                 column_list=display_columns
             )
             if row[-check_back:] == r["row"][-check_back:]:
