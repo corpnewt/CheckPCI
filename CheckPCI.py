@@ -326,6 +326,9 @@ class CheckPCI:
         dev_header = dev_header.replace("ACPI+Device","ACPI+Device Paths")
         dev_list = [dev_header,"-"*len(dev_header)]+sorted(dev_list)
         print("\n".join(dev_list))
+        if os.name == "nt":
+            # Pause to prevent the window from closing prematurely
+            self.u.grab("\nPress [enter] to exit...")
 
 if __name__ == '__main__':
     # Create our object to get values for the help output
