@@ -18,24 +18,49 @@ class CheckPCI:
             ("Device",0)
         )
 
-    def main(self,device_name=None,columns=None):
+    def get_row(self, row, column_list=None):
+        # Takes an interable row and compares with
+        # the default_columns - using only the indices
+        # in the column_list and padding as needed.
+        if not isinstance(row,(list,tuple)):
+            # Not an interable type we want
+            return None
+        def_len = len(self.default_columns)
+        new_row = []
+        if isinstance(column_list,(list,tuple)) and \
+        all(isinstance(x,int) and 0<=x<def_len for x in column_list):
+            # We got a list of valid numbers - let's use it
+            for i in sorted(column_list):
+                if i >= len(row):
+                    continue # Out of range
+                new_row.append(
+                    row[i].ljust(self.default_columns[i][1])
+                )
+        else:
+            # Not valid numbers - just get all of the
+            # applicable entries and pad them
+            for i,x in enumerate(row):
+                if i < def_len:
+                    # In range - pad as needed
+                    x = x.ljust(self.default_columns[i][1])
+                new_row.append(x)
+        return new_row
+
+    def main(self,device_name=None,columns=None,column_match=None):
         if device_name is not None and not isinstance(device_name,str):
             device_name = str(device_name)
         display_columns = []
         if isinstance(columns,(list,tuple)):
             for c in columns:
                 try:
-                    c = int(c)-1
+                    c = int(c)
                     self.default_columns[c]
                     if not c in display_columns:
                         display_columns.append(c)
                 except:
                     pass
         else:
-            display_columns = list(range(len(self.default_columns)))
-        if not display_columns:
-            print("No columns to display!")
-            exit(1)
+            display_columns = None
         all_devs = self.i.get_all_devices()
         dev_list = []
         for p in all_devs.values():
@@ -47,74 +72,76 @@ class CheckPCI:
             # Check our name if we are looking for one
             if device_name and not p.get("name_no_addr","").lower() == device_name.lower():
                 continue # Not our device name - skip
-            # Set defaults
-            pcidebug = vendev = builtin = bridged = acpi = device = ""
-            # Check if we're getting the pcidebug info
-            if 0 in display_columns:
-                pcidebug = "??:??.?"
-                if "pcidebug" in p_dict:
-                    # Try to organize it the same way gfxutil does
-                    try:
-                        a,b,c = p_dict["pcidebug"].strip('"').split("(")[0].split(":")
-                        pcidebug = "{}:{}.{}".format(
-                            hex(int(a))[2:].rjust(2,"0"),
-                            hex(int(b))[2:].rjust(2,"0"),
-                            hex(int(c))[2:]
-                        )
-                    except Exception as e:
-                        print(e)
-                        pass
-                pcidebug = pcidebug.ljust(self.default_columns[0][1])
-            # Check if we're getting the ven:dev info
-            if 1 in display_columns:
-                vendev = "????:????"
+            pcidebug = "??:??.?"
+            if "pcidebug" in p_dict:
+                # Try to organize it the same way gfxutil does
                 try:
-                    ven = binascii.hexlify(binascii.unhexlify(ven[1:5])[::-1]).decode()
-                    dev = binascii.hexlify(binascii.unhexlify(dev[1:5])[::-1]).decode()
-                    vendev = "{}:{}".format(ven,dev)
+                    a,b,c = p_dict["pcidebug"].strip('"').split("(")[0].split(":")
+                    pcidebug = "{}:{}.{}".format(
+                        hex(int(a))[2:].rjust(2,"0"),
+                        hex(int(b))[2:].rjust(2,"0"),
+                        hex(int(c))[2:]
+                    )
                 except:
                     pass
-                vendev = vendev.ljust(self.default_columns[1][1])
-            # Check if we're getting the built-in info
-            if 2 in display_columns:
-                builtin = "NO"
-                if "built-in" in p_dict or "IOBuiltin" in p_dict:
-                    builtin = "YES"
-                builtin = builtin.ljust(self.default_columns[2][1])
-            # Check if we're getting the bridged info
-            if 3 in display_columns:
-                bridged = "YES"
-                if p_dict.get("acpi-path"):
-                    bridged = "NO"
-                bridged = bridged.ljust(self.default_columns[3][1])
-            # Check if we're getting the ACPI path
-            if 4 in display_columns:
-                acpi = p.get("acpi_path","Unknown APCI Path")
-            # Check if we're getting the device path
-            if 5 in display_columns:
-                device = p.get("device_path","Unknown Device Path")
-            # Join the info together
-            acpi_device = " = ".join([x for x in (acpi,device) if x])
-            final_column = " ".join([x for x in (pcidebug,vendev,builtin,bridged,acpi_device) if x])
+            vendev = "????:????"
+            try:
+                # Swap endianness of each 16-bit value and format
+                ven = binascii.hexlify(binascii.unhexlify(ven[1:5])[::-1]).decode()
+                dev = binascii.hexlify(binascii.unhexlify(dev[1:5])[::-1]).decode()
+                vendev = "{}:{}".format(ven,dev)
+            except:
+                pass
+            builtin = "NO"
+            if "built-in" in p_dict or "IOBuiltin" in p_dict:
+                builtin = "YES"
+            bridged = "YES"
+            if p_dict.get("acpi-path"):
+                bridged = "NO"
+            acpi = p.get("acpi_path","Unknown APCI Path")
+            device = p.get("device_path","Unknown Device Path")
+            row = (pcidebug,vendev,builtin,bridged,acpi,device)
+            # Ensure our columns match if needed
+            if column_match:
+                matched = True
+                for c,v in column_match:
+                    if c >= len(row) or row[c].lower() != v:
+                        # Out of range
+                        matched = False
+                        continue
+                if not matched:
+                    continue # No match
+            # Parse the info based on our columns
+            row = self.get_row(
+                row,
+                column_list=display_columns
+            )
+            if row[-2:] == [acpi,device]:
+                # Special handler to join ACPI and Device paths
+                # with " = "
+                row = row[:-2]+[" = ".join([acpi,device])]
             # Add to the list
-            dev_list.append(final_column)
+            dev_list.append(" ".join(row))
         if not dev_list:
             # Nothing was returned - adjust output based on
             # whether or not we're searching
-            if device_name is None:
+            if device_name is None and column_match is None:
                 print("No PCI devices located!")
+            elif column_match:
+                print("No devices matching the passed info were found!")
             else:
                 print("No device matching '{}' was found!".format(device_name))
             exit(1)
         # Gather our column headers
-        header_list = []
-        for i in sorted(display_columns):
-            _head,_adj = self.default_columns[i]
-            header_list.append(_head.ljust(_adj))
+        header_row = self.get_row(
+            [x[0] for x in self.default_columns],
+            column_list=display_columns
+        )
         # Join "ACPI" and "Device" with a "+"
-        if header_list[-2:] == ["ACPI","Device"]:
-            header_list = header_list[:-2]+["ACPI+Device"]
-        dev_header = " ".join(header_list)
+        if header_row[-2:] == ["ACPI","Device"]:
+            header_row = header_row[:-2]+["ACPI+Device"]
+        dev_header = " ".join(header_row)
+        # Append " Paths" if the last entry was a path
         if dev_header.endswith(("ACPI","Device")):
             dev_header += " Paths"
         dev_list = [dev_header,"-"*len(dev_header)]+sorted(dev_list)
@@ -129,6 +156,7 @@ if __name__ == '__main__':
     parser.add_argument("-f", "--find-name", help="find device paths for objects with the passed name from the IODeviceTree")
     parser.add_argument("-i", "--local-ioreg", help="path to local ioreg dump to leverage")
     parser.add_argument("-c", "--column-list", help="comma delimited list of numbers representing which columns to display.  Options are:\n{}".format(available))
+    parser.add_argument("-m", "--column-match", help="match entry formatted as NUM=VAL.  e.g. To match all bridged devices: 4=YES",action="append",nargs="*")
     args = parser.parse_args()
     if args.local_ioreg:
         ioreg_path = p.u.check_path(args.local_ioreg)
@@ -160,17 +188,42 @@ if __name__ == '__main__':
                     a,b = min(a,b),max(a,b)
                     for c in range(a,b+1):
                         if not c in columns:
-                            columns.append(c)
+                            columns.append(c-1)
                 else:
                     c = int(x.strip())
                     assert 0 < c <= _max
                     if not c in columns:
-                        columns.append(c)
+                        columns.append(c-1)
             except:
-                pass
+                columns = None
+                break
         if not columns:
             print("Invalid column information passed.  Can only accept comma delmited numbers from")
             print("1-{} corresponding to the following:".format(_max))
             print(available)
             exit(1)
-    p.main(device_name=args.find_name,columns=columns)
+    column_match = None
+    if args.column_match:
+        column_match = []
+        _max = len(p.default_columns)
+        for x in args.column_match:
+            # Args are passed as individual lists
+            for y in x:
+                try:
+                    c,m = y.split("=")
+                    c = int(c.strip())
+                    assert 0 < c <= _max
+                    m = m.strip().lower() # Normalize case
+                    # Strip any duplicate indices
+                    column_match = [z for z in column_match if x[0] != c]
+                    # Add our new check
+                    column_match.append((c-1,m))
+                except:
+                    column_match = None
+                    break
+            if column_match is None:
+                break # Ran into an issue
+        if not column_match:
+            print("Invalid column match information passed.")
+            exit(1)
+    p.main(device_name=args.find_name,columns=columns,column_match=column_match)
