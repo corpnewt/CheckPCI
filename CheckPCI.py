@@ -90,25 +90,26 @@ class CheckPCI:
             "args":[
                 "powershell",
                 "-c",
-                "$devList=Get-PnpDevice|select -Property FriendlyName,InstanceId;foreach($d in $devList){$n=$d.FriendlyName;$d=$d.InstanceId;if($d.StartsWith(\"PCI\\\")){$l=Get-PnpDeviceProperty -KeyName DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths -InstanceId $d|select -Property Data;Write-Output $n $d $l}}"
+                "Get-PnpDevice|Where-Object InstanceId -like 'PCI*'|Get-PnpDeviceProperty -KeyName DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths|select -Property InstanceId,Data|Format-Table|Out-String -width 9999"
             ]
         })[0].replace("\r","").split("\n")
         if not out:
             return None
         # Walk the devices and their subsequent paths
-        dev = name = None
-        loc = "??:??.?"
+        dev = None
         dev_dict = {}
         for l in out:
-            if not l.replace("-","").replace("Data","").strip():
-                continue # Skip empty lines and headers
-            if l.startswith("PCI\\"):
-                # Got a device
-                dev = l
-            elif l.startswith("{") and dev:
+            if not l.strip().startswith("PCI\\"):
+                continue # No data here
+            dev = l.split()[0]
+            if not dev in dev_dict:
+                # Initialize the device if needed
+                dev_dict[dev] = {}
+            val = l[len(dev):].strip()
+            if val.startswith("{"):
                 # Got the location paths
                 try:
-                    paths = l.split("{")[1].split("}")[0].split(", ")
+                    paths = val.split("{")[1].split("}")[0].split(", ")
                     dev_path = next((p for p in paths if p.startswith("PCIROOT(")),None)
                     acpi_path = next((p for p in paths if p.startswith("ACPI(")),None)
                     bridged = "NO" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "YES"
@@ -121,33 +122,25 @@ class CheckPCI:
                         dev_name = acpi_path.split("ACPI(")[-1].split(")")[0]
                     dev_paths = self.sanitize_device_path(dev_path)
                     if not dev_paths:
-                        # Broken?
-                        continue
+                        dev_paths = ("Unknown Device Path","Unknown Device Path")
                     acpi_formatted = self.format_acpi_path(acpi_path)
-                    if not acpi_formatted:
-                        continue
-                    dev_dict[dev] = {
-                        "pcidebug":loc,
-                        "device_path":dev_paths[0],
-                        "acpi_path":acpi_formatted,
-                        "bridged":bridged,
-                        "ven_dev":"{}:{}".format(ven_id,dev_id).lower()
-                    }
+                    # Set the props
+                    dev_dict[dev]["device_path"] = dev_paths[0]
+                    dev_dict[dev]["acpi_path"] = acpi_formatted or "Unknown ACPI Path"
+                    dev_dict[dev]["bridged"] = bridged
+                    dev_dict[dev]["ven_dev"] = "{}:{}".format(ven_id,dev_id).lower()
                     if dev_name:
                         dev_dict[dev]["name"] = dev_name
                     if dev_paths[0] != dev_paths[1]:
                         dev_dict[dev]["overflow_device_path"] = dev_paths[1]
-                    if name:
-                        dev_dict[dev]["friendly_name"] = name
                 except:
                     pass
-                dev = name = None # Reset
-                loc = "??:??.?"
-            elif l.startswith("PCI bus "):
+                dev = None # Reset
+            elif val.startswith("PCI bus "):
                 # Get our location info organizec the same way gfxutil does
                 try:
-                    a,b,c = [x.split()[-1] for x in l.split(", ")]
-                    loc = "{}:{}.{}".format(
+                    a,b,c = [x.split()[-1] for x in val.split(", ")]
+                    dev_dict[dev]["pcidebug"] = "{}:{}.{}".format(
                         hex(int(a))[2:].rjust(2,"0"),
                         hex(int(b))[2:].rjust(2,"0"),
                         hex(int(c))[2:]
@@ -156,7 +149,9 @@ class CheckPCI:
                     pass
             else:
                 # Got a friendly name
-                name = l.strip()
+                name = val.strip()
+                if name:
+                    dev_dict[dev]["friendly_name"] = name
         return dev_dict
 
     def get_ps_entries(self):
@@ -241,7 +236,7 @@ class CheckPCI:
             bridged = "YES"
             if p_dict.get("acpi-path"):
                 bridged = "NO"
-            acpi = p.get("acpi_path","Unknown APCI Path")
+            acpi = p.get("acpi_path","Unknown ACPI Path")
             device = p.get("device_path","Unknown Device Path")
             rows.append({
                 "name":p.get("name_no_addr",""),
