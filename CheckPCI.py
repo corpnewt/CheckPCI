@@ -124,7 +124,11 @@ class CheckPCI:
                     if not dev_paths:
                         dev_paths = ("Unknown Device Path","Unknown Device Path")
                     acpi_formatted = self.format_acpi_path(acpi_path)
-                    # Set the props
+                    # Let's reformat the ACPI path - if any, skip the 
+                    # first entry as it isn't considered in gfxutil (i.e. _SB)
+                    if acpi_formatted:
+                        # Make sure to prefix our path with /
+                        acpi_formatted = "/"+"/".join(acpi_formatted.split(".")[1:])
                     dev_dict[dev]["device_path"] = dev_paths[0]
                     dev_dict[dev]["acpi_path"] = acpi_formatted or "Unknown ACPI Path"
                     dev_dict[dev]["bridged"] = bridged
@@ -201,21 +205,24 @@ class CheckPCI:
         # Return the info
         return dev_dict
 
-    def get_ps_entries(self):
+    def get_ps_entries(self,include_names=False):
         all_devs = self.get_pci_dict()
         rows = []
         for p in all_devs.values():
             rows.append({
                 "name":p.get("name",""),
-                "row":(
+                "row":[
                     p["pcidebug"],
                     p["ven_dev"],
                     p["bridged"],
                     p["acpi_path"],
-                    p["device_path"],
+                    p["device_path"]
+                ]
+            })
+            if include_names:
+                rows[-1]["row"].append(
                     p.get("friendly_name","")
                 )
-            })
         return rows
 
     def get_row(self, row, column_list=None):
@@ -287,14 +294,14 @@ class CheckPCI:
             device = p.get("device_path","Unknown Device Path")
             rows.append({
                 "name":p.get("name_no_addr",""),
-                "row":(pcidebug,vendev,builtin,bridged,acpi,device)
+                "row":[pcidebug,vendev,builtin,bridged,acpi,device]
             })
         return rows
 
     def main(self,device_name=None,columns=None,column_match=None,include_names=False):
         if device_name is not None and not isinstance(device_name,str):
             device_name = str(device_name)
-        if include_names:
+        if os.name == "nt" and include_names and not self.default_columns[-1][0] == "FriendlyName":
             self.default_columns.append(("FriendlyName",0))
         display_columns = []
         if isinstance(columns,(list,tuple)):
@@ -308,25 +315,30 @@ class CheckPCI:
                     pass
         else:
             display_columns = None
+        # Keep track of how far back we need to look for
+        # pathing entries
+        check_back = -2
+        check_rem  = None
         # Get our device list based on our OS
         if os.name == "nt":
-            rows = self.get_ps_entries()
-            check_back = 3 # Look for ACPI, Device, "" on Windows
+            rows = self.get_ps_entries(include_names=include_names)
+            # Look for ACPI, Device, and FriendlyName on Windows
+            if include_names:
+                check_back = -3
+                check_rem  = -1
         else:
             rows = self.get_ioreg_entries()
-            check_back = 2 # Look for ACPI and Device on macOS
         dev_list = []
         # Iterate those devices
         for r in rows:
             # Check our name if we are looking for one
             if device_name and not r.get("name","").lower() == device_name.lower():
                 continue # Not our device name - skip
-            row = r["row"]
             # Ensure our columns match if needed
             if column_match:
                 matched = True
                 for c,v in column_match:
-                    if c >= len(row) or row[c].lower() != v:
+                    if c >= len(r["row"]) or r["row"][c].lower() != v:
                         # Out of range
                         matched = False
                         continue
@@ -334,13 +346,16 @@ class CheckPCI:
                     continue # No match
             # Parse the info based on our columns
             row = self.get_row(
-                row if sys.platform.lower()=="darwin" or include_names else row[:-1],
+                r["row"],
                 column_list=display_columns
             )
-            if row[-check_back:] == r["row"][-check_back:]:
+            if row[check_back:check_rem] == r["row"][check_back:check_rem]:
                 # Special handler to join ACPI and Device paths
                 # with " = "
-                row = row[:-check_back]+[" = ".join(r["row"][-check_back:])]
+                row = row[:check_back]+[" = ".join(r["row"][check_back:check_rem])]
+                if check_rem is not None:
+                    # Append the remainder separated by spaces again
+                    row += r["row"][check_rem:]
             # Add to the list
             dev_list.append(" ".join(row))
         if not dev_list:
@@ -359,13 +374,13 @@ class CheckPCI:
             column_list=display_columns
         )
         dev_header = " ".join(header_row)
-        # Append " Paths" if the last entry was a path
+        # Append " Path" if the last entry was a path
         if "ACPI Device" in dev_header:
-            dev_header = dev_header.replace("ACPI Device","APCI+Device Paths")
+            dev_header = dev_header.replace("ACPI Device","APCI+Device Path")
         else:
-            dev_header = dev_header.replace("ACPI","ACPI Paths").replace("Device","Device Paths")
+            dev_header = dev_header.replace("ACPI","ACPI Path").replace("Device","Device Path")
         dev_header = dev_header.replace("ACPI Device","ACPI+Device")
-        dev_header = dev_header.replace("ACPI+Device","ACPI+Device Paths")
+        dev_header = dev_header.replace("ACPI+Device","ACPI+Device Path")
         dev_list = [dev_header,"-"*len(dev_header)]+sorted(dev_list)
         print("\n".join(dev_list))
         if os.name == "nt":
@@ -388,6 +403,7 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
+    include_names = getattr(args,"include_names",False)
     if sys.platform.lower() == "darwin" and args.local_ioreg:
         ioreg_path = p.u.check_path(args.local_ioreg)
         if not ioreg_path:
@@ -409,6 +425,8 @@ if __name__ == '__main__':
         # Ensure we have values that are valid
         columns = []
         _max = len(p.default_columns)
+        if include_names:
+            _max += 1 # Account for the name column
         for x in args.column_list.split(","):
             try:
                 if "-" in x:
@@ -436,6 +454,8 @@ if __name__ == '__main__':
     if args.column_match:
         column_match = []
         _max = len(p.default_columns)
+        if include_names:
+            _max += 1 # Account for the name column
         for x in args.column_match:
             # Args are passed as individual lists
             for y in x:
@@ -460,5 +480,5 @@ if __name__ == '__main__':
         device_name=args.find_name,
         columns=columns,
         column_match=column_match,
-        include_names=getattr(args,"include_names",False)
+        include_names=include_names
     )
