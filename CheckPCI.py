@@ -37,34 +37,57 @@ class CheckPCI:
             # Not a device path - bail
             return
         # Strip out PciRoot() and Pci() - then split by separators
-        adrs = re.split(r"#|\/",device_path.lower().replace("pciroot(","").replace("pci(","").replace(")",""))
+        addrs = re.split(r"#|\/",device_path.lower().replace("pciroot(","").replace("pci(","").replace(")",""))
         new_path = []
         overflow_path = []
-        for i,adr in enumerate(adrs):
+        for i,addr in enumerate(addrs):
             if i == 0:
                 # Check for roots
-                if "," in adr: return # Broken
+                if "," in addr: return # Broken
                 try:
-                    adr = int(adr,16)
-                    new_path.append("PciRoot({})".format(self.hexy(adr)))
-                    overflow_path.append("PciRoot({})".format(self.hexy(0 if adr>0xFF else adr)))
+                    addr = int(addr,16)
+                    new_path.append("PciRoot({})".format(self.hexy(addr)))
+                    overflow_path.append("PciRoot({})".format(self.hexy(0 if addr>0xFF else addr)))
                 except: return # Broken again :(
             else:
-                if "," in adr: # Not Windows formatted
-                    try: adr1,adr2 = [int(x,16) for x in adr.split(",")]
+                if "," in addr: # Not Windows formatted
+                    try: addr1,addr2 = [int(x,16) for x in addr.split(",")]
                     except: return # REEEEEEEEEE
                 else:
                     try:
-                        adr = int(adr,16)
-                        adr2,adr1 = adr & 0xFF, adr >> 8 & 0xFF
+                        addr = int(addr,16)
+                        addr1,addr2 = addr >> 8 & 0xFF, addr & 0xFF
                     except: return # AAAUUUGGGHHHHHHHH
-                # Should have adr1 and adr2 - let's add them
-                new_path.append("Pci({},{})".format(self.hexy(adr1),self.hexy(adr2)))
+                # Should have addr1 and addr2 - let's add them
+                new_path.append("Pci({},{})".format(self.hexy(addr1),self.hexy(addr2)))
                 overflow_path.append("Pci({},{})".format(
-                    self.hexy(0 if adr1>0xFF else adr1),
-                    self.hexy(0 if adr2>0xFF else adr2)
+                    self.hexy(0 if addr1>0xFF else addr1),
+                    self.hexy(0 if addr2>0xFF else addr2)
                 ))
         return ("/".join(new_path),"/".join(overflow_path))
+
+    def get_acpi_from_pci(self,pci_element):
+        if not isinstance(pci_element,str) or not pci_element.lower().startswith(("pci(","pciroot(")):
+            return
+        addr = pci_element.split("(")[1].split(")")[0]
+        if pci_element.lower().startswith("pciroot("):
+            # PCIROOT() entry
+            return addr # Return as-is
+        else:
+            # PCI() entry
+            try:
+                addr = int(addr,16)
+                addr1,addr2 = addr >> 8 & 0xFF, addr & 0xFF
+            except:
+                return
+            # Build our address as needed
+            if not addr2:
+                return hex(addr1)[2:].upper()
+            else:
+                return "{},{}".format(
+                    hex(addr1)[2:].upper(),
+                    hex(addr2)[2:].upper()
+                )
 
     def format_acpi_path(self, acpi_path):
         if not acpi_path or not acpi_path.lower().startswith("acpi("):
@@ -77,7 +100,7 @@ class CheckPCI:
             elif a.startswith("PCI("):
                 # This is abridge - just take note
                 acpi_comps.append("pci-bridge")
-        if not all(len(x)<=4 or x=="pci-bridge" for x in acpi_comps):
+        if not all(len(x)<=4 or x.startswith("pci-bridge") for x in acpi_comps):
             # Broken somehow?
             return
         # Return the resulting path
@@ -113,13 +136,13 @@ class CheckPCI:
                     dev_path = next((p for p in paths if p.startswith("PCIROOT(")),None)
                     acpi_path = next((p for p in paths if p.startswith("ACPI(")),None)
                     bridged = "NO" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "YES"
-                    try: ven_id = dev.split("VEN_")[1][:4]
+                    try: ven_id = dev.split("VEN_")[1][:4].lower()
                     except: ven_id = "????"
-                    try: dev_id = dev.split("DEV_")[1][:4]
+                    try: dev_id = dev.split("DEV_")[1][:4].lower()
                     except: dev_id = "????"
                     dev_name = None
                     if acpi_path.split("#")[-1].startswith("ACPI("):
-                        dev_name = acpi_path.split("ACPI(")[-1].split(")")[0]
+                        dev_name = acpi_path.split("ACPI(")[-1].split(")")[0].rstrip("_")
                     dev_paths = self.sanitize_device_path(dev_path)
                     if not dev_paths:
                         dev_paths = ("Unknown Device Path","Unknown Device Path")
@@ -128,11 +151,30 @@ class CheckPCI:
                     # first entry as it isn't considered in gfxutil (i.e. _SB)
                     if acpi_formatted:
                         # Make sure to prefix our path with /
-                        acpi_formatted = "/"+"/".join(acpi_formatted.split(".")[1:])
+                        acpi_parts = [a.rstrip("_") for a in acpi_formatted.split(".")[1:]]
+                        # Get our addresses from the PCI() elements
+                        pci_parts = dev_path.split("#")
+                        if len(pci_parts) == len(acpi_parts):
+                            # Walk the pci parts and keep track of the addressing
+                            for i,part in enumerate(pci_parts):
+                                addr = self.get_acpi_from_pci(part)
+                                if not addr:
+                                    continue
+                                acpi_parts[i]+="@{}".format(addr)
+                        if acpi_parts[-1].startswith("pci-bridge@"):
+                            # We're a PCI bridge - save our ven,dev as well
+                            pci_bridge = "pci{},{}@{}".format(
+                                ven_id,
+                                dev_id,
+                                acpi_parts[-1].split("@")[-1]
+                            )
+                            acpi_parts = acpi_parts[:-1]+[pci_bridge]
+                            dev_dict[dev]["pci_bridge"] = pci_bridge
+                        acpi_formatted = "/"+"/".join(acpi_parts)
                     dev_dict[dev]["device_path"] = dev_paths[0]
                     dev_dict[dev]["acpi_path"] = acpi_formatted or "Unknown ACPI Path"
                     dev_dict[dev]["bridged"] = bridged
-                    dev_dict[dev]["ven_dev"] = "{}:{}".format(ven_id,dev_id).lower()
+                    dev_dict[dev]["ven_dev"] = "{}:{}".format(ven_id,dev_id)
                     if dev_name:
                         dev_dict[dev]["name"] = dev_name
                     if dev_paths[0] != dev_paths[1]:
@@ -202,6 +244,29 @@ class CheckPCI:
             if dev_path and dev_path.startswith("PciRoot(") and not \
             dev_path.startswith(pci_root):
                 dev_dict[dev]["device_path"] = "/".join([pci_root]+dev_path.split("/")[1:])
+        # Ensure all our pci@x,y entries that were populated with
+        # ven/dev ids are updated to pciVEN,DEV@x,y formatting
+        for dev in dev_dict:
+            if not dev_dict[dev].get("pci_bridge") or not dev_dict[dev].get("device_path"):
+                # This isn't bridged or is missing a device path,
+                # we don't need to update
+                continue
+            dev_path = dev_dict[dev]["device_path"]
+            # We got a bridged device - let's check for every
+            # device which starts with the same device path, and
+            # update the Nth entry of the ACPI path to reflect
+            # our bridge.
+            for d in dev_dict:
+                if d == dev or not dev_dict[d].get("device_path","").startswith(dev_path) \
+                or not dev_dict[d].get("acpi_path") or dev_dict[d]["acpi_path"].startswith("Unknown "):
+                    # Don't check ourselves or broken/unrelated entries
+                    continue
+                # Replace the Nth entry in the ACPI path with our
+                # bridge
+                n = dev_path.count("/")+1
+                a = dev_dict[d]["acpi_path"].split("/")
+                a[n] = dev_dict[dev]["pci_bridge"]
+                dev_dict[d]["acpi_path"] = "/".join(a)
         # Return the info
         return dev_dict
 
@@ -476,8 +541,11 @@ if __name__ == '__main__':
         if not column_match:
             print("Invalid column match information passed.")
             exit(1)
+    find_name = None
+    if args.find_name:
+        find_name = args.find_name.strip().rstrip("_")
     p.main(
-        device_name=args.find_name,
+        device_name=find_name,
         columns=columns,
         column_match=column_match,
         include_names=include_names
