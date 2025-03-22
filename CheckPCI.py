@@ -90,9 +90,9 @@ class CheckPCI:
             "args":[
                 "powershell",
                 "-c",
-                "Get-PnpDevice|Where-Object InstanceId -like 'PCI*'|Get-PnpDeviceProperty -KeyName DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths|select -Property InstanceId,Data|Format-Table|Out-String -width 9999"
+                "Get-PnpDevice -PresentOnly|Where-Object InstanceId -like 'PCI*'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths|Select -Property InstanceId,Data|Format-Table|Out-String -width 9999"
             ]
-        })[0].replace("\r","").split("\n")
+        })[0].replace("\r","").strip().split("\n")
         if not out:
             return None
         # Walk the devices and their subsequent paths
@@ -101,7 +101,7 @@ class CheckPCI:
         for l in out:
             if not l.strip().startswith("PCI\\"):
                 continue # No data here
-            dev = l.split()[0]
+            dev = l.split()[0].upper()
             if not dev in dev_dict:
                 # Initialize the device if needed
                 dev_dict[dev] = {}
@@ -147,11 +147,55 @@ class CheckPCI:
                     )
                 except:
                     pass
+            elif val.startswith(("ACPI\\")):
+                # Must be the parent path
+                try:
+                    pci_root = "PciRoot(0x{})".format(hex(int(val.split("\\")[-1]))[2:].upper())
+                    dev_dict[dev]["pci_root"] = pci_root
+                except:
+                    pass
+            elif val.startswith("PCI\\"):
+                # Got a parent path - keep track for later
+                dev_dict[dev]["parent_path"] = val.upper()
             else:
                 # Got a friendly name
                 name = val.strip()
                 if name:
                     dev_dict[dev]["friendly_name"] = name
+        # Resolve all parents to their pci_root
+        for dev in dev_dict:
+            if not "parent_path" in dev_dict[dev]:
+                continue # No need - skip
+            # Let's resolve this to the top parent
+            seen = []
+            p = dev
+            while True:
+                # Check if we have another parent
+                _p = dev_dict[p].get("parent_path")
+                if _p:
+                    if _p in seen:
+                        # Cyclic?
+                        break
+                    # Save it for later
+                    seen.append(_p)
+                    # Keep going
+                    p = _p
+                    continue
+                # We reached the top - check
+                # for a pci_root
+                if dev_dict[p].get("pci_root"):
+                    # Let's update ours to match this
+                    pci_root = dev_dict[p]["pci_root"]
+                    dev_dict[dev]["pci_root"] = pci_root
+                break
+        # Ensure all elements have the correct pci_root
+        for dev in dev_dict:
+            pci_root = dev_dict[dev].get("pci_root","PciRoot(0x0)")
+            dev_path = dev_dict[dev].get("device_path")
+            if dev_path and dev_path.startswith("PciRoot(") and not \
+            dev_path.startswith(pci_root):
+                dev_dict[dev]["device_path"] = "/".join([pci_root]+dev_path.split("/")[1:])
+        # Return the info
         return dev_dict
 
     def get_ps_entries(self):
