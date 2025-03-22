@@ -227,7 +227,7 @@ class CheckPCI:
                 # This should be the last data listed - gather our PCI bus,
                 # device, and function info.
                 try:
-                    m = self.b_d_f_re.fullmatch(val)
+                    m = self.b_d_f_re.match(val)
                     a,b,c = m.group("bus"),m.group("device"),m.group("function")
                     dev_dict[dev]["pcidebug"] = "{}:{}.{}".format(
                         hex(int(a))[2:].rjust(2,"0"),
