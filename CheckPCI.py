@@ -300,7 +300,8 @@ class CheckPCI:
             # update the Nth entry of the ACPI path to reflect
             # our bridge.
             for d in dev_dict:
-                if d == dev or not dev_dict[d].get("device_path","").startswith(dev_path) \
+                if d == dev or dev_dict[d].get("bridged") == "NO" \
+                or not dev_dict[d].get("device_path","").startswith(dev_path) \
                 or not dev_dict[d].get("acpi_path") or dev_dict[d]["acpi_path"].startswith("Unknown "):
                     # Don't check ourselves or broken/unrelated entries
                     continue
