@@ -196,7 +196,7 @@ class CheckPCI:
             elif val.startswith(("ACPI\\")):
                 # Must be the parent path
                 try:
-                    pci_root = "PciRoot(0x{})".format(hex(int(val.split("\\")[-1]))[2:].upper())
+                    pci_root = "PciRoot(0x{})".format(hex(int(val.split("\\")[-1],16))[2:].upper())
                     dev_dict[dev]["pci_root"] = pci_root
                 except:
                     pass
