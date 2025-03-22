@@ -90,7 +90,7 @@ class CheckPCI:
             "args":[
                 "powershell",
                 "-c",
-                "Get-PnpDevice -PresentOnly|Where-Object InstanceId -like 'PCI*'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths|Select -Property InstanceId,Data|Format-Table|Out-String -width 9999"
+                "Get-PnpDevice -PresentOnly|Where-Object InstanceId -like 'PCI*'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
             ]
         })[0].replace("\r","").strip().split("\n")
         if not out:
@@ -171,6 +171,9 @@ class CheckPCI:
             p = dev
             while True:
                 # Check if we have another parent
+                if not p in dev_dict:
+                    # Found an orphan - just bail
+                    break
                 _p = dev_dict[p].get("parent_path")
                 if _p:
                     if _p in seen:
