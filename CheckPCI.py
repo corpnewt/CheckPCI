@@ -10,6 +10,7 @@ class CheckPCI:
         self.u = utils.Utils("CheckPCI")
         self.i = ioreg.IOReg()
         self.r = run.Run()
+        self.b_d_f_re = re.compile(r"^[^\d]*(?P<bus>\d+)[^\d]+(?P<device>\d+)[^\d]+(?P<function>\d+)[^\d]*$")
         if os.name == "nt":
             self.default_columns = [
                 ("PCIDBG",7),
@@ -113,7 +114,7 @@ class CheckPCI:
             "args":[
                 "powershell",
                 "-c",
-                r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths,DEVPKEY_Device_Address|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
+                r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
             ]
         })[0].replace("\r","").strip().split("\n")
         if not out:
@@ -222,21 +223,23 @@ class CheckPCI:
             elif val.isdigit():
                 # Got the address
                 dev_dict[dev]["address"] = int(val)
-            else:
-                # Got either a friendly name or the PCI bus, dev, func info
-                # First try to split up the values for our own usage
-                # Get our location info organizec the same way gfxutil does
+            elif "address" in dev_dict[dev]:
+                # This should be the last data listed - gather our PCI bus,
+                # device, and function info.
                 try:
-                    a,b,c = [x.split()[-1] for x in val.split(", ")]
+                    m = self.b_d_f_re.fullmatch(val)
+                    a,b,c = m.group("bus"),m.group("device"),m.group("function")
                     dev_dict[dev]["pcidebug"] = "{}:{}.{}".format(
                         hex(int(a))[2:].rjust(2,"0"),
                         hex(int(b))[2:].rjust(2,"0"),
                         hex(int(c))[2:]
                     )
                 except:
-                    name = val.strip()
-                    if name:
-                        dev_dict[dev]["friendly_name"] = name
+                    pass
+            else:
+                # We've exhausted the other options, must
+                # be the name
+                dev_dict[dev]["friendly_name"] = val.strip()
         # Resolve all parents to their pci_root
         for dev in dev_dict:
             # Make sure we have a root path, an ACPI path, and that our
