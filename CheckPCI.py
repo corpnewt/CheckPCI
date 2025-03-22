@@ -113,7 +113,7 @@ class CheckPCI:
             "args":[
                 "powershell",
                 "-c",
-                "Get-PnpDevice -PresentOnly|Where-Object InstanceId -like 'PCI*'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
+                r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationInfo,DEVPKEY_Device_LocationPaths,DEVPKEY_Device_Address|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
             ]
         })[0].replace("\r","").strip().split("\n")
         if not out:
@@ -121,14 +121,40 @@ class CheckPCI:
         # Walk the devices and their subsequent paths
         dev = None
         dev_dict = {}
+        pci_dict = {}
         for l in out:
-            if not l.strip().startswith("PCI\\"):
+            if not l.strip().startswith(("PCI\\","ACPI\\")):
                 continue # No data here
             dev = l.split()[0].upper()
+            val = l[len(dev):].strip()
+            if dev.startswith("ACPI\\"):
+                # Got a PCI bus or root complex
+                if not dev in pci_dict:
+                    pci_dict[dev] = {}
+                # See if we got a path - or an address
+                if val.startswith("{"):
+                    # ACPI address - get the path
+                    try:
+                        pci_dict[dev]["acpi_path"] = val.split("(")[-1].split(")")[0]
+                    except:
+                        pass
+                else:
+                    # Try to convert it to a number - assume it's an address
+                    try:
+                        pci_dict[dev]["address"] = hex(int(val.strip()))[2:].upper()
+                    except:
+                        # Not an int - skip it
+                        continue
+                # Check if we have both the acpi_path and address, and
+                # ensure the path reflects that
+                if all(x in pci_dict[dev] for x in ("acpi_path","address")) \
+                and not "@" in pci_dict[dev]["acpi_path"]:
+                    pci_dict[dev]["acpi_path"]+="@"+pci_dict[dev]["address"]
+                continue # Skip PCI checks
+            # We must have a PCI entry
             if not dev in dev_dict:
                 # Initialize the device if needed
                 dev_dict[dev] = {}
-            val = l[len(dev):].strip()
             if val.startswith("{"):
                 # Got the location paths
                 try:
@@ -198,6 +224,7 @@ class CheckPCI:
                 try:
                     pci_root = "PciRoot(0x{})".format(hex(int(val.split("\\")[-1],16))[2:].upper())
                     dev_dict[dev]["pci_root"] = pci_root
+                    dev_dict[dev]["pci_root_path"] = val.strip().upper()
                 except:
                     pass
             elif val.startswith("PCI\\"):
@@ -210,6 +237,22 @@ class CheckPCI:
                     dev_dict[dev]["friendly_name"] = name
         # Resolve all parents to their pci_root
         for dev in dev_dict:
+            # Make sure we have a root path, an ACPI path, and that our
+            # root path exists in and corresponds to a valid ACPI path
+            # in the pci_dict
+            if dev_dict[dev].get("pci_root_path") \
+            and dev_dict[dev].get("acpi_path","").startswith("/") \
+            and dev_dict[dev]["pci_root_path"] in pci_dict \
+            and pci_dict[dev_dict[dev]["pci_root_path"]].get("acpi_path"):
+                # Update the ACPI path to reflect the PCI root's address,
+                # not the _UID
+                a = dev_dict[dev]["acpi_path"].split("/")
+                b = pci_dict[dev_dict[dev]["pci_root_path"]]["acpi_path"]
+                if a[1] != b:
+                    # Only update if we need to
+                    a[1] = b
+                    dev_dict[dev]["acpi_path"] = "/".join(a)
+            # Check for parents that need resolving
             if not "parent_path" in dev_dict[dev]:
                 continue # No need - skip
             # Let's resolve this to the top parent
