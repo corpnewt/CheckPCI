@@ -208,17 +208,6 @@ class CheckPCI:
                 except:
                     pass
                 dev = None # Reset
-            elif val.startswith("PCI bus "):
-                # Get our location info organizec the same way gfxutil does
-                try:
-                    a,b,c = [x.split()[-1] for x in val.split(", ")]
-                    dev_dict[dev]["pcidebug"] = "{}:{}.{}".format(
-                        hex(int(a))[2:].rjust(2,"0"),
-                        hex(int(b))[2:].rjust(2,"0"),
-                        hex(int(c))[2:]
-                    )
-                except:
-                    pass
             elif val.startswith(("ACPI\\")):
                 # Must be the parent path
                 try:
@@ -230,11 +219,24 @@ class CheckPCI:
             elif val.startswith("PCI\\"):
                 # Got a parent path - keep track for later
                 dev_dict[dev]["parent_path"] = val.upper()
+            elif val.isdigit():
+                # Got the address
+                dev_dict[dev]["address"] = int(val)
             else:
-                # Got a friendly name
-                name = val.strip()
-                if name:
-                    dev_dict[dev]["friendly_name"] = name
+                # Got either a friendly name or the PCI bus, dev, func info
+                # First try to split up the values for our own usage
+                # Get our location info organizec the same way gfxutil does
+                try:
+                    a,b,c = [x.split()[-1] for x in val.split(", ")]
+                    dev_dict[dev]["pcidebug"] = "{}:{}.{}".format(
+                        hex(int(a))[2:].rjust(2,"0"),
+                        hex(int(b))[2:].rjust(2,"0"),
+                        hex(int(c))[2:]
+                    )
+                except:
+                    name = val.strip()
+                    if name:
+                        dev_dict[dev]["friendly_name"] = name
         # Resolve all parents to their pci_root
         for dev in dev_dict:
             # Make sure we have a root path, an ACPI path, and that our
