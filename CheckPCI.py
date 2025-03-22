@@ -323,11 +323,11 @@ class CheckPCI:
             rows.append({
                 "name":p.get("name",""),
                 "row":[
-                    p["pcidebug"],
-                    p["ven_dev"],
-                    p["bridged"],
-                    p["acpi_path"],
-                    p["device_path"]
+                    p.get("pcidebug","??:??.?"),
+                    p.get("ven_dev","????:????"),
+                    p.get("bridged","???"),
+                    p.get("acpi_path","Unknown ACPI Path"),
+                    p.get("device_path","Unknown Device Path")
                 ]
             })
             if include_names:
