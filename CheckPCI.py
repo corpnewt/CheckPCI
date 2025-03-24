@@ -355,7 +355,7 @@ class CheckPCI:
                 if i >= len(row):
                     continue # Out of range
                 new_row.append(
-                    row[i].ljust(self.default_columns[i][1])
+                    (row[i] or "").ljust(self.default_columns[i][1])
                 )
         else:
             # Not valid numbers - just get all of the
@@ -363,7 +363,7 @@ class CheckPCI:
             for i,x in enumerate(row):
                 if i < def_len:
                     # In range - pad as needed
-                    x = x.ljust(self.default_columns[i][1])
+                    x = (x or "").ljust(self.default_columns[i][1])
                 new_row.append(x)
         return new_row
 
