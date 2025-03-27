@@ -16,9 +16,10 @@ options:
   -i, --local-ioreg LOCAL_IOREG
                         path to local ioreg dump to leverage
   -c, --column-list COLUMN_LIST
-                        comma delimited list of numbers representing which columns to display. Options are: 1 - PCIDBG, 2 - VEN:DEV, 3 - Built-In, 4 - ACPI, 5 - Device
+                        comma delimited list of numbers representing which columns to display. Options are: 1 -
+                        PCIDBG, 2 - VEN:DEV, 3 - Built-In, 4 - ACPI, 5 - Device
   -m, --column-match [COLUMN_MATCH ...]
-                        match entry formatted as NUM=VAL. e.g. To match all bridged devices: 4=YES
+                        match entry formatted as NUM=VAL. e.g. To match all devices that aren't built-in: -m 3=NO
 ```
 
 ***
