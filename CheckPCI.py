@@ -154,7 +154,7 @@ class CheckPCI:
                     paths = val.split("{")[1].split("}")[0].split(", ")
                     dev_path = next((p for p in paths if p.startswith("PCIROOT(")),None)
                     acpi_path = next((p for p in paths if p.startswith("ACPI(")),None)
-                    bridged = "NO" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "YES"
+                    built_in = "YES" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "NO"
                     try: ven_id = dev.split("VEN_")[1][:4].lower()
                     except: ven_id = "????"
                     try: dev_id = dev.split("DEV_")[1][:4].lower()
@@ -192,7 +192,7 @@ class CheckPCI:
                         acpi_formatted = "/"+"/".join(acpi_parts)
                     dev_dict[dev]["device_path"] = dev_paths[0]
                     dev_dict[dev]["acpi_path"] = acpi_formatted or "Unknown ACPI Path"
-                    dev_dict[dev]["bridged"] = bridged
+                    dev_dict[dev]["built_in"] = built_in
                     dev_dict[dev]["ven_dev"] = "{}:{}".format(ven_id,dev_id)
                     if dev_name:
                         dev_dict[dev]["name"] = dev_name
@@ -297,7 +297,7 @@ class CheckPCI:
             # update the Nth entry of the ACPI path to reflect
             # our bridge.
             for d in dev_dict:
-                if d == dev or dev_dict[d].get("bridged") == "NO" \
+                if d == dev or dev_dict[d].get("built_in") == "YES" \
                 or not dev_dict[d].get("device_path","").startswith(dev_path) \
                 or not dev_dict[d].get("acpi_path") or dev_dict[d]["acpi_path"].startswith("Unknown "):
                     # Don't check ourselves or broken/unrelated entries
@@ -320,7 +320,7 @@ class CheckPCI:
                 "row":[
                     p.get("pcidebug","??:??.?"),
                     p.get("ven_dev","????:????"),
-                    p.get("bridged","???"),
+                    p.get("built_in","???"),
                     p.get("acpi_path","Unknown ACPI Path"),
                     p.get("device_path","Unknown Device Path")
                 ]
@@ -428,6 +428,7 @@ class CheckPCI:
         # Check if we got an ioreg override file path
         if ioreg_override is not None:
             ioreg_path = self.u.check_path(ioreg_override)
+            ioreg_type = "macOS ioreg dump"
             if not ioreg_path:
                 print("'{}' does not exist!".format(ioreg_override))
                 exit(1)
@@ -455,6 +456,7 @@ class CheckPCI:
                     self.i.ioreg["IOService"] = ioreg_data
                     rows = self.get_ioreg_entries(include_names=include_names)
                 elif ioreg_data[0].startswith("InstanceId"):
+                    ioreg_type = "Windows Powershell dump"
                     # Likely a Windows powershell dump
                     rows = self.get_ps_entries(include_names=include_names,ps_output=ioreg_data)
                 else:
@@ -464,7 +466,7 @@ class CheckPCI:
             except Exception as e:
                 print("Failed to read '{}': {}".format(ioreg_override,e))
                 exit(1)
-            print("Using local ioreg: {}".format(ioreg_path))
+            print("Using local {}: {}".format(ioreg_type,ioreg_path))
         else:
             # Get our device list based on our OS
             if os.name == "nt":
@@ -540,7 +542,7 @@ if __name__ == '__main__':
     parser.add_argument("-n", "--include-names", help="include friendly names for devices where applicable",action="store_true")
     parser.add_argument("-i", "--local-ioreg", help="path to local ioreg dump to leverage")
     parser.add_argument("-c", "--column-list", help="comma delimited list of numbers representing which columns to display.  Options are:\n{}".format(available))
-    parser.add_argument("-m", "--column-match", help="match entry formatted as NUM=VAL.  e.g. To match all bridged devices: 4=YES",action="append",nargs="*")
+    parser.add_argument("-m", "--column-match", help="match entry formatted as NUM=VAL.  e.g. To match all devices that aren't built-in: -m 3=NO",action="append",nargs="*")
     
     args = parser.parse_args()
 
