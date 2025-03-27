@@ -97,18 +97,24 @@ class CheckPCI:
         # Return the resulting path
         return ".".join(acpi_comps)
 
-    def get_pci_dict(self, ps_output=None):
-        # Attempt to run a powershell one-liner to get a list of all
-        # instance ids which start with PCI
-        if ps_output is None:
-            # We didn't get a value sent
-            ps_output = self.r.run({
+    def get_local_info(self):
+        if os.name == "nt":
+            return self.r.run({
                 "args":[
                     "powershell",
                     "-c",
                     r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
                 ]
             })[0].replace("\r","").strip().split("\n")
+        else:
+            return self.i.get_ioreg()
+
+    def get_pci_dict(self, ps_output=None):
+        # Attempt to run a powershell one-liner to get a list of all
+        # instance ids which start with PCI
+        if ps_output is None:
+            # We didn't get a value sent
+            ps_output = self.get_local_info()
         if not ps_output:
             return None
         # Walk the devices and their subsequent paths
@@ -540,11 +546,26 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog="CheckPCI.py", description="CheckPCI - a py script to list PCI device info from the IODeviceTree.")
     parser.add_argument("-f", "--find-name", help="find device paths for objects with the passed name from the IODeviceTree")
     parser.add_argument("-n", "--include-names", help="include friendly names for devices where applicable",action="store_true")
-    parser.add_argument("-i", "--local-ioreg", help="path to local ioreg dump to leverage")
+    parser.add_argument("-i", "--local-ioreg", help="path to local ioreg/powershell dump to leverage")
     parser.add_argument("-c", "--column-list", help="comma delimited list of numbers representing which columns to display.  Options are:\n{}".format(available))
     parser.add_argument("-m", "--column-match", help="match entry formatted as NUM=VAL.  e.g. To match all devices that aren't built-in: -m 3=NO",action="append",nargs="*")
-    
+    parser.add_argument("-o", "--output-file", help="dump the current machine's ioreg/powershell info to the provided path and exit")
+
     args = parser.parse_args()
+
+    if args.output_file:
+        # Just dumping output
+        ioreg_type = "Windows Powershell dump" if os.name == "nt" else "macOS ioreg dump"
+        print("Gathering info...")
+        out = p.get_local_info()
+        try:
+            with open(args.output_file,"wb") as f:
+                f.write("\n".join(out).encode())
+        except Exception as e:
+            print("Failed to save: {}".format(e))
+            exit(1)
+        print("Saved {} to '{}'".format(ioreg_type,args.output_file))
+        exit()
 
     columns = None
     if args.column_list:
