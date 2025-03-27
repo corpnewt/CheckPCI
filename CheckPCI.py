@@ -11,23 +11,13 @@ class CheckPCI:
         self.i = ioreg.IOReg()
         self.r = run.Run()
         self.b_d_f_re = re.compile(r"^[^\d]*(?P<bus>\d+)[^\d]+(?P<device>\d+)[^\d]+(?P<function>\d+)[^\d]*$")
-        if os.name == "nt":
-            self.default_columns = [
-                ("PCIDBG",7),
-                ("VEN:DEV",9),
-                ("Bridged",7),
-                ("ACPI",0),
-                ("Device",0)
-            ]
-        else:
-            self.default_columns = (
-                ("PCIDBG",7),
-                ("VEN:DEV",9),
-                ("Built-In",8),
-                ("Bridged",7),
-                ("ACPI",0),
-                ("Device",0)
-            )
+        self.default_columns = [
+            ("PCIDBG",7),
+            ("VEN:DEV",9),
+            ("Built-In",8),
+            ("ACPI",0),
+            ("Device",0)
+        ]
 
     def hexy(self, integer,pad_to=0):
         return "0x"+hex(integer)[2:].upper().rjust(pad_to,"0")
@@ -107,23 +97,25 @@ class CheckPCI:
         # Return the resulting path
         return ".".join(acpi_comps)
 
-    def get_pci_dict(self):
+    def get_pci_dict(self, ps_output=None):
         # Attempt to run a powershell one-liner to get a list of all
         # instance ids which start with PCI
-        out = self.r.run({
-            "args":[
-                "powershell",
-                "-c",
-                r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
-            ]
-        })[0].replace("\r","").strip().split("\n")
-        if not out:
+        if ps_output is None:
+            # We didn't get a value sent
+            ps_output = self.r.run({
+                "args":[
+                    "powershell",
+                    "-c",
+                    r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
+                ]
+            })[0].replace("\r","").strip().split("\n")
+        if not ps_output:
             return None
         # Walk the devices and their subsequent paths
         dev = None
         dev_dict = {}
         pci_dict = {}
-        for l in out:
+        for l in ps_output:
             if not l.strip().startswith(("PCI\\","ACPI\\")):
                 continue # No data here
             dev = l.split()[0].upper()
@@ -319,8 +311,8 @@ class CheckPCI:
         # Return the info
         return dev_dict
 
-    def get_ps_entries(self,include_names=False):
-        all_devs = self.get_pci_dict()
+    def get_ps_entries(self,include_names=False, ps_output=None):
+        all_devs = self.get_pci_dict(ps_output=ps_output)
         rows = []
         for p in all_devs.values():
             rows.append({
@@ -367,7 +359,7 @@ class CheckPCI:
                 new_row.append(x)
         return new_row
 
-    def get_ioreg_entries(self):
+    def get_ioreg_entries(self,include_names=False):
         all_devs = self.i.get_all_devices()
         # Walk the entries and process them as needed - returning
         # the values expected, in order
@@ -399,23 +391,24 @@ class CheckPCI:
             except:
                 pass
             builtin = "NO"
-            if "built-in" in p_dict or "IOBuiltin" in p_dict:
+            if "built-in" in p_dict or "IOBuiltin" in p_dict or p_dict.get("acpi-path"):
                 builtin = "YES"
-            bridged = "YES"
-            if p_dict.get("acpi-path"):
-                bridged = "NO"
             acpi = p.get("acpi_path","Unknown ACPI Path")
             device = p.get("device_path","Unknown Device Path")
             rows.append({
                 "name":p.get("name_no_addr",""),
-                "row":[pcidebug,vendev,builtin,bridged,acpi,device]
+                "row":[pcidebug,vendev,builtin,acpi,device]
             })
+            if include_names:
+                rows[-1]["row"].append(
+                    p_dict.get("model","").strip("<>").strip('"')
+                )
         return rows
 
-    def main(self,device_name=None,columns=None,column_match=None,include_names=False):
+    def main(self,device_name=None,columns=None,column_match=None,include_names=False,ioreg_override=None):
         if device_name is not None and not isinstance(device_name,str):
             device_name = str(device_name)
-        if os.name == "nt" and include_names and not self.default_columns[-1][0] == "FriendlyName":
+        if include_names and not self.default_columns[-1][0] == "FriendlyName":
             self.default_columns.append(("FriendlyName",0))
         display_columns = []
         if isinstance(columns,(list,tuple)):
@@ -431,17 +424,53 @@ class CheckPCI:
             display_columns = None
         # Keep track of how far back we need to look for
         # pathing entries
-        check_back = -2
-        check_rem  = None
-        # Get our device list based on our OS
-        if os.name == "nt":
-            rows = self.get_ps_entries(include_names=include_names)
-            # Look for ACPI, Device, and FriendlyName on Windows
-            if include_names:
-                check_back = -3
-                check_rem  = -1
+        check_back,check_rem = (-3,-1) if include_names else (-2,None)
+        # Check if we got an ioreg override file path
+        if ioreg_override is not None:
+            ioreg_path = self.u.check_path(ioreg_override)
+            if not ioreg_path:
+                print("'{}' does not exist!".format(ioreg_override))
+                exit(1)
+            elif not os.path.isfile(ioreg_path):
+                print("'{}' is not a file!".format(ioreg_override))
+                exit(1)
+            # Try loading it
+            try:
+                with open(ioreg_path,"rb") as f:
+                    # Read the data, replace null chars,
+                    # decode to a string, strip whitespace,
+                    # replace carriage returns, and split
+                    # by newlines (yay)
+                    ioreg_data = f.read() \
+                    .replace(b"\x00",b"") \
+                    .decode(errors="ignore") \
+                    .strip() \
+                    .replace("\r","") \
+                    .split("\n")
+                # Make sure we got *something*
+                assert ioreg_data
+                # We need to determine if this is a macOS or Windows file
+                if ioreg_data[0].startswith("+-o "):
+                    # Likely a macOS ioreg dump
+                    self.i.ioreg["IOService"] = ioreg_data
+                    rows = self.get_ioreg_entries(include_names=include_names)
+                elif ioreg_data[0].startswith("InstanceId"):
+                    # Likely a Windows powershell dump
+                    rows = self.get_ps_entries(include_names=include_names,ps_output=ioreg_data)
+                else:
+                    # Unknown approach - just throw an error
+                    print(ioreg_data[0:3])
+                    raise Exception("Unknown ioreg type")
+            except Exception as e:
+                print("Failed to read '{}': {}".format(ioreg_override,e))
+                exit(1)
+            print("Using local ioreg: {}".format(ioreg_path))
         else:
-            rows = self.get_ioreg_entries()
+            # Get our device list based on our OS
+            if os.name == "nt":
+                rows = self.get_ps_entries(include_names=include_names)
+            else:
+                rows = self.get_ioreg_entries(include_names=include_names)
         dev_list = []
         # Iterate those devices
         for r in rows:
@@ -508,38 +537,19 @@ if __name__ == '__main__':
     # Setup the cli args
     parser = argparse.ArgumentParser(prog="CheckPCI.py", description="CheckPCI - a py script to list PCI device info from the IODeviceTree.")
     parser.add_argument("-f", "--find-name", help="find device paths for objects with the passed name from the IODeviceTree")
-    if os.name == "nt":
-        parser.add_argument("-n", "--include-names", help="include friendly names for devices where applicable (Windows only)",action="store_true")
-    else:
-        parser.add_argument("-i", "--local-ioreg", help="path to local ioreg dump to leverage (macOS Only)")
+    parser.add_argument("-n", "--include-names", help="include friendly names for devices where applicable",action="store_true")
+    parser.add_argument("-i", "--local-ioreg", help="path to local ioreg dump to leverage")
     parser.add_argument("-c", "--column-list", help="comma delimited list of numbers representing which columns to display.  Options are:\n{}".format(available))
     parser.add_argument("-m", "--column-match", help="match entry formatted as NUM=VAL.  e.g. To match all bridged devices: 4=YES",action="append",nargs="*")
     
     args = parser.parse_args()
-    
-    include_names = getattr(args,"include_names",False)
-    if sys.platform.lower() == "darwin" and args.local_ioreg:
-        ioreg_path = p.u.check_path(args.local_ioreg)
-        if not ioreg_path:
-            print("'{}' does not exist!".format(args.local_ioreg))
-            exit(1)
-        elif not os.path.isfile(ioreg_path):
-            print("'{}' is not a file!".format(args.local_ioreg))
-            exit(1)
-        # Try loading it
-        try:
-            with open(ioreg_path,"rb") as f:
-                p.i.ioreg["IOService"] = f.read().decode(errors="ignore").split("\n")
-        except Exception as e:
-            print("Failed to read '{}': {}".format(args.local_ioreg,e))
-            exit(1)
-        print("Using local ioreg: {}".format(ioreg_path))
+
     columns = None
     if args.column_list:
         # Ensure we have values that are valid
         columns = []
         _max = len(p.default_columns)
-        if include_names:
+        if args.include_names:
             _max += 1 # Account for the name column
         for x in args.column_list.split(","):
             try:
@@ -568,7 +578,7 @@ if __name__ == '__main__':
     if args.column_match:
         column_match = []
         _max = len(p.default_columns)
-        if include_names:
+        if args.include_names:
             _max += 1 # Account for the name column
         for x in args.column_match:
             # Args are passed as individual lists
@@ -597,5 +607,6 @@ if __name__ == '__main__':
         device_name=find_name,
         columns=columns,
         column_match=column_match,
-        include_names=include_names
+        include_names=args.include_names,
+        ioreg_override=args.local_ioreg
     )
