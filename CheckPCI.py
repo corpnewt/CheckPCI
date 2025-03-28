@@ -107,7 +107,7 @@ class CheckPCI:
                 ]
             })[0].replace("\r","").strip().split("\n")
         else:
-            return self.i.get_ioreg()
+            return self.i.get_ioreg(plane="IODeviceTree")
 
     def get_pci_dict(self, ps_output=None):
         # Attempt to run a powershell one-liner to get a list of all
