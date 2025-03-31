@@ -406,9 +406,7 @@ class CheckPCI:
                 "row":[pcidebug,vendev,builtin,acpi,device]
             })
             if include_names:
-                rows[-1]["row"].append(
-                    p_dict.get("model","").strip("<>").strip('"')
-                )
+                rows[-1]["row"].append(self.i.get_pci_device_name(p_dict))
         return rows
 
     def main(self,device_name=None,columns=None,column_match=None,include_names=False,ioreg_override=None):
