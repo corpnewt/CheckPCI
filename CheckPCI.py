@@ -1,5 +1,5 @@
 import os, sys, binascii, argparse, re
-from Scripts import ioreg, utils, run
+from Scripts import ioreg, utils, run, plist
 
 class CheckPCI:
     def __init__(self):
@@ -163,8 +163,18 @@ class CheckPCI:
                     built_in = "YES" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "NO"
                     try: ven_id = dev.split("VEN_")[1][:4].lower()
                     except: ven_id = "????"
+                    try: dev_dict[dev]["vendor-id"] = int(ven_id,16)
+                    except: pass
                     try: dev_id = dev.split("DEV_")[1][:4].lower()
                     except: dev_id = "????"
+                    try: dev_dict[dev]["device-id"] = int(dev_id,16)
+                    except: pass
+                    try:
+                        subvensys_id = dev.split("SUBSYS_")[1][:8].lower()
+                        dev_dict[dev]["subsystem-vendor-id"] = int(subvensys_id[:4],16)
+                        dev_dict[dev]["subsystem-id"] = int(subvensys_id[4:],16)
+                    except:
+                        pass
                     dev_name = None
                     if acpi_path.split("#")[-1].startswith("ACPI("):
                         dev_name = acpi_path.split("ACPI(")[-1].split(")")[0].rstrip("_")
@@ -329,7 +339,11 @@ class CheckPCI:
                     p.get("built_in","???"),
                     p.get("acpi_path","Unknown ACPI Path"),
                     p.get("device_path","Unknown Device Path")
-                ]
+                ],
+                "dict":{
+                    "info":p,
+                    "device_path":p.get("device_path")
+                }
             })
             if include_names:
                 rows[-1]["row"].append(
@@ -403,11 +417,122 @@ class CheckPCI:
             device = p.get("device_path","Unknown Device Path")
             rows.append({
                 "name":p.get("name_no_addr",""),
-                "row":[pcidebug,vendev,builtin,acpi,device]
+                "row":[pcidebug,vendev,builtin,acpi,device],
+                "dict":p
             })
             if include_names:
                 rows[-1]["row"].append(self.i.get_pci_device_name(p_dict))
         return rows
+
+    def _load_ioreg(self, ioreg_override, include_names=False):
+        # Change to this directory for relative pathing
+        os.chdir(os.path.dirname(os.path.realpath(__file__)))
+        # Resolve the path
+        ioreg_path = self.u.check_path(ioreg_override)
+        ioreg_type = "macOS ioreg dump"
+        if not ioreg_path:
+            print("'{}' does not exist!".format(ioreg_override))
+            exit(1)
+        elif not os.path.isfile(ioreg_path):
+            print("'{}' is not a file!".format(ioreg_override))
+            exit(1)
+        # Try loading it
+        try:
+            with open(ioreg_path,"rb") as f:
+                # Read the data, replace null chars,
+                # decode to a string, strip whitespace,
+                # replace carriage returns, and split
+                # by newlines (yay)
+                ioreg_data = f.read() \
+                .replace(b"\x00",b"") \
+                .decode(errors="ignore") \
+                .strip() \
+                .replace("\r","") \
+                .split("\n")
+            # Make sure we got *something*
+            assert ioreg_data
+            # We need to determine if this is a macOS or Windows file
+            if ioreg_data[0].startswith("+-o "):
+                # Likely a macOS ioreg dump
+                self.i.ioreg["IOService"] = ioreg_data
+                rows = self.get_ioreg_entries(include_names=include_names)
+            elif ioreg_data[0].startswith("InstanceId"):
+                ioreg_type = "Windows Powershell dump"
+                # Likely a Windows powershell dump
+                rows = self.get_ps_entries(include_names=include_names,ps_output=ioreg_data)
+            else:
+                # Unknown approach - just throw an error
+                print(ioreg_data[0:3])
+                raise Exception("Unknown ioreg type")
+        except Exception as e:
+            print("Failed to read '{}': {}".format(ioreg_override,e))
+            exit(1)
+        print("Using local {}: {}".format(ioreg_type,ioreg_path))
+        return rows
+
+    def save_plist(self,plist_path,ioreg_override=None):
+        # Check if we got an ioreg override file path
+        if ioreg_override is not None:
+            rows = self._load_ioreg(ioreg_override)
+        else:
+            # Get our device list based on our OS
+            if os.name == "nt":
+                rows = self.get_ps_entries()
+            else:
+                rows = self.get_ioreg_entries()
+        devices = {
+            "DeviceProperties": {
+                "Add":{}
+            }
+        }
+        dev_props = devices["DeviceProperties"]["Add"]
+        for r in rows:
+            rd = r.get("dict",{})
+            p = rd.get("device_path")
+            d = rd.get("info")
+            if not p or not d:
+                continue # Borked
+            d_info = self.i.get_device_info_from_pci_ids(d)
+            if not d_info or not d_info.get("device"):
+                continue # Didn't resolve
+            # Add our info - we want AAPL,slot-name, model, and
+            # device_type for PCI devices to populate
+            try:
+                root = int(p.split("PciRoot(")[1].split(")")[0],16)
+                paths = []
+                for i,x in enumerate(p.split("/")):
+                    if x.startswith("Pci("):
+                        a = [int(y,16) for y in x.split("Pci(")[1].split(")")[0].split(",")]
+                        # Check if we're adding the first entry
+                        if not paths:
+                            # Prepend our root
+                            a = [root]+a
+                        # Join into a string with commas
+                        paths.append(",".join([str(y) for y in a]))
+                # Join the path components with slashes
+                slot_name = "Internal@{}".format("/".join(paths))
+            except:
+                continue # Borked in some way
+            # Ensure Intel display adapters are prefixed with
+            # "Intel" for Intel Power Gadget
+            model = d_info["device"]
+            if (d_info.get("class") or "").startswith("Display ") \
+            and (d_info.get("vendor") or "").startswith("Intel") \
+            and not model.startswith("Intel"):
+                model = "Intel "+model
+            dev_props[p] = {
+                "AAPL,slot-name":slot_name,
+                "model":model,
+                "device_type":d_info.get("subclass") or d_info.get("class") or "Unknown Type"
+            }
+            # Check for built-in and warn if not
+            try:
+                if r["row"][2] != "YES":
+                    dev_props[p]["# WARNING - Not Built-in"]="Device properties may not take effect unless PCI bridges are defined in ACPI"
+            except:
+                pass
+        with open(plist_path,"wb") as f:
+            plist.dump(devices,f)
 
     def main(self,device_name=None,columns=None,column_match=None,include_names=False,ioreg_override=None):
         if device_name is not None and not isinstance(device_name,str):
@@ -431,46 +556,7 @@ class CheckPCI:
         check_back,check_rem = (-3,-1) if include_names else (-2,None)
         # Check if we got an ioreg override file path
         if ioreg_override is not None:
-            ioreg_path = self.u.check_path(ioreg_override)
-            ioreg_type = "macOS ioreg dump"
-            if not ioreg_path:
-                print("'{}' does not exist!".format(ioreg_override))
-                exit(1)
-            elif not os.path.isfile(ioreg_path):
-                print("'{}' is not a file!".format(ioreg_override))
-                exit(1)
-            # Try loading it
-            try:
-                with open(ioreg_path,"rb") as f:
-                    # Read the data, replace null chars,
-                    # decode to a string, strip whitespace,
-                    # replace carriage returns, and split
-                    # by newlines (yay)
-                    ioreg_data = f.read() \
-                    .replace(b"\x00",b"") \
-                    .decode(errors="ignore") \
-                    .strip() \
-                    .replace("\r","") \
-                    .split("\n")
-                # Make sure we got *something*
-                assert ioreg_data
-                # We need to determine if this is a macOS or Windows file
-                if ioreg_data[0].startswith("+-o "):
-                    # Likely a macOS ioreg dump
-                    self.i.ioreg["IOService"] = ioreg_data
-                    rows = self.get_ioreg_entries(include_names=include_names)
-                elif ioreg_data[0].startswith("InstanceId"):
-                    ioreg_type = "Windows Powershell dump"
-                    # Likely a Windows powershell dump
-                    rows = self.get_ps_entries(include_names=include_names,ps_output=ioreg_data)
-                else:
-                    # Unknown approach - just throw an error
-                    print(ioreg_data[0:3])
-                    raise Exception("Unknown ioreg type")
-            except Exception as e:
-                print("Failed to read '{}': {}".format(ioreg_override,e))
-                exit(1)
-            print("Using local {}: {}".format(ioreg_type,ioreg_path))
+            rows = self._load_ioreg(ioreg_override,include_names=include_names)
         else:
             # Get our device list based on our OS
             if os.name == "nt":
@@ -544,16 +630,22 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(prog="CheckPCI.py", description="CheckPCI - a py script to list PCI device info from the IODeviceTree.")
     parser.add_argument("-f", "--find-name", help="find device paths for objects with the passed name from the IODeviceTree")
     parser.add_argument("-n", "--include-names", help="include friendly names for devices where applicable",action="store_true")
-    parser.add_argument("-i", "--local-ioreg", help="path to local ioreg/powershell dump to leverage")
+    parser.add_argument("-i", "--local-ioreg", help="path relative to this script for local ioreg/powershell to leverage")
     parser.add_argument("-c", "--column-list", help="comma delimited list of numbers representing which columns to display.  Options are:\n{}".format(available))
     parser.add_argument("-m", "--column-match", help="match entry formatted as NUM=VAL.  e.g. To match all devices that aren't built-in: -m 3=NO",action="append",nargs="*")
-    parser.add_argument("-o", "--output-file", help="dump the current machine's ioreg/powershell info to the provided path and exit")
+    parser.add_argument("-o", "--output-file", help="dump the current machine's ioreg/powershell info to the provided path relative to this script and exit")
+    parser.add_argument("-p", "--save-plist", help="dump all detected PCI devices to the provided path relative to this script and exit")
 
     args = parser.parse_args()
 
     if args.output_file:
+        # Change to this directory for relative pathing
+        os.chdir(os.path.dirname(os.path.realpath(__file__)))
         # Just dumping output
         ioreg_type = "Windows Powershell dump" if os.name == "nt" else "macOS ioreg dump"
+        # Ensure it uses the .txt extension
+        if not args.output_file.lower().endswith(".txt"):
+            args.output_file += ".txt"
         print("Gathering info...")
         out = p.get_local_info()
         try:
@@ -563,6 +655,25 @@ if __name__ == '__main__':
             print("Failed to save: {}".format(e))
             exit(1)
         print("Saved {} to '{}'".format(ioreg_type,args.output_file))
+        exit()
+
+    if args.save_plist:
+        # Change to this directory for relative pathing
+        os.chdir(os.path.dirname(os.path.realpath(__file__)))
+        # Ensure it uses the .plist extension
+        if not args.save_plist.lower().endswith(".plist"):
+            args.save_plist += ".plist"
+        print("Gathering info...")
+        # Dump our PCI devices to the passed file path
+        try:
+            p.save_plist(
+                args.save_plist,
+                ioreg_override=args.local_ioreg
+            )
+        except Exception as e:
+            print("Failed to save: {}".format(e))
+            exit(1)
+        print("Saved plist data to '{}'".format(args.save_plist))
         exit()
 
     columns = None
