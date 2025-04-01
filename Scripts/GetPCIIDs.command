@@ -17,11 +17,5 @@ if [ ! -e "$dir/pci.ids.gz" ]; then
     echo "Failed to download"
     exit 1
 fi
-echo "Decompressing..."
-gunzip -f "$dir/pci.ids.gz"
-if [ "$?" != "0" ]; then
-    echo "Failed to decompress"
-    exit 1
-fi
 echo
 echo "Done"
