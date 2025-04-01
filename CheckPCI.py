@@ -103,7 +103,7 @@ class CheckPCI:
                 "args":[
                     "powershell",
                     "-c",
-                    r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,Data|Format-Table -Autosize|Out-String -width 9999"
+                    r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_PciDevice_BaseClass,DEVPKEY_PciDevice_SubClass,DEVPKEY_PciDevice_ProgIf,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,KeyName,Data|Format-Table -Autosize|Out-String -width 9999"
                 ]
             })[0].replace("\r","").strip().split("\n")
         else:
@@ -124,8 +124,9 @@ class CheckPCI:
         for l in ps_output:
             if not l.strip().startswith(("PCI\\","ACPI\\")):
                 continue # No data here
-            dev = l.split()[0].upper()
-            val = l[len(dev):].strip()
+            dev = l.split()[0].upper().strip()
+            key = l.split()[1].strip()
+            val = " ".join(l.split()[2:]).strip()
             if dev.startswith("ACPI\\"):
                 # Got a PCI bus or root complex
                 if not dev in pci_dict:
@@ -154,7 +155,7 @@ class CheckPCI:
             if not dev in dev_dict:
                 # Initialize the device if needed
                 dev_dict[dev] = {}
-            if val.startswith("{"):
+            if key == "DEVPKEY_Device_LocationPaths":
                 # Got the location paths
                 try:
                     paths = val.split("{")[1].split("}")[0].split(", ")
@@ -217,23 +218,23 @@ class CheckPCI:
                 except:
                     pass
                 dev = None # Reset
-            elif val.startswith(("ACPI\\")):
-                # Must be the parent path
-                try:
-                    pci_root = "PciRoot(0x{})".format(hex(int(val.split("\\")[-1],16))[2:].upper())
-                    dev_dict[dev]["pci_root"] = pci_root
-                    dev_dict[dev]["pci_root_path"] = val.strip().upper()
-                except:
-                    pass
-            elif val.startswith("PCI\\"):
-                # Got a parent path - keep track for later
-                dev_dict[dev]["parent_path"] = val.upper()
-            elif val.isdigit():
+            elif key == "DEVPKEY_Device_Parent":
+                if val.startswith(("ACPI\\")):
+                    # Must be the root parent path
+                    try:
+                        pci_root = "PciRoot(0x{})".format(hex(int(val.split("\\")[-1],16))[2:].upper())
+                        dev_dict[dev]["pci_root"] = pci_root
+                        dev_dict[dev]["pci_root_path"] = val.strip().upper()
+                    except:
+                        pass
+                elif val.startswith("PCI\\"):
+                    # Got a parent path - keep track for later
+                    dev_dict[dev]["parent_path"] = val.upper()
+            elif key == "DEVPKEY_Device_Address":
                 # Got the address
                 dev_dict[dev]["address"] = int(val)
-            elif "address" in dev_dict[dev]:
-                # This should be the last data listed - gather our PCI bus,
-                # device, and function info.
+            elif key == "DEVPKEY_Device_LocationInfo":
+                # Gather our PCI bus, device, and function info.
                 try:
                     m = self.b_d_f_re.match(val)
                     a,b,c = m.group("bus"),m.group("device"),m.group("function")
@@ -244,10 +245,30 @@ class CheckPCI:
                     )
                 except:
                     pass
-            else:
-                # We've exhausted the other options, must
-                # be the name
+            elif key == "DEVPKEY_NAME":
+                # Got the device name
                 dev_dict[dev]["friendly_name"] = val.strip()
+            elif key == "DEVPKEY_PciDevice_BaseClass":
+                # Got the base class
+                try: dev_dict[dev]["base-class"] = int(val.strip())
+                except: continue
+            elif key == "DEVPKEY_PciDevice_SubClass":
+                # Got the sub class
+                try: dev_dict[dev]["sub-class"] = int(val.strip())
+                except: continue
+            elif key == "DEVPKEY_PciDevice_ProgIf":
+                # Got the programming interface
+                try: dev_dict[dev]["programming-interface"] = int(val.strip())
+                except: continue
+                # Check if we got all our class info and build
+                # our 32-bit int as needed
+                c = dev_dict[dev].get("base-class")
+                s = dev_dict[dev].get("sub-class")
+                p = dev_dict[dev].get("programming-interface")
+                if all(x is not None for x in (c,s,p)):
+                    # Class code uses 0xAAAABBCC type formatting
+                    cc = (c << 16) + (s << 8) + p
+                    dev_dict[dev]["class-code"] = cc
         # Resolve all parents to their pci_root
         for dev in dev_dict:
             # Make sure we have a root path, an ACPI path, and that our
