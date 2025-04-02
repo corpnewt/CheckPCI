@@ -492,7 +492,7 @@ class CheckPCI:
                 # Likely a macOS ioreg dump
                 self.i.ioreg["IOService"] = ioreg_data
                 rows = self.get_ioreg_entries(include_names=include_names)
-            elif ioreg_data[0].startswith("InstanceId"):
+            elif ioreg_data[0].startswith(("InstanceId","DeviceID")):
                 ioreg_type = "Windows Powershell dump"
                 # Likely a Windows powershell dump
                 rows = self.get_ps_entries(include_names=include_names,ps_output=ioreg_data)
