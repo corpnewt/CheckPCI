@@ -195,14 +195,14 @@ def get_dev_property(d_list,did,devpkey):
 
 def get_pci_devices():
     props = (
-        (DEVPKEY_Device_Parent,       "DEVPKEY_Device_Parent"),
-        (DEVPKEY_NAME,                "DEVPKEY_NAME"),
-        (DEVPKEY_Device_LocationPaths,"DEVPKEY_Device_LocationPaths"),
-        (DEVPKEY_PciDevice_BaseClass, "DEVPKEY_PciDevice_BaseClass"),
-        (DEVPKEY_PciDevice_SubClass,  "DEVPKEY_PciDevice_SubClass"),
-        (DEVPKEY_PciDevice_ProgIf,    "DEVPKEY_PciDevice_ProgIf"),
-        (DEVPKEY_Device_Address,      "DEVPKEY_Device_Address"),
-        (DEVPKEY_Device_LocationInfo, "DEVPKEY_Device_LocationInfo")
+        (DEVPKEY_Device_Parent,       "DEVPKEY_Device_Parent",       None),
+        (DEVPKEY_NAME,                "DEVPKEY_NAME",                SPDRP_DEVICEDESC),
+        (DEVPKEY_Device_LocationPaths,"DEVPKEY_Device_LocationPaths",SPDRP_LOCATION_PATHS),
+        (DEVPKEY_PciDevice_BaseClass, "DEVPKEY_PciDevice_BaseClass", None),
+        (DEVPKEY_PciDevice_SubClass,  "DEVPKEY_PciDevice_SubClass",  None),
+        (DEVPKEY_PciDevice_ProgIf,    "DEVPKEY_PciDevice_ProgIf",    None),
+        (DEVPKEY_Device_Address,      "DEVPKEY_Device_Address",      SPDRP_ADDRESS),
+        (DEVPKEY_Device_LocationInfo, "DEVPKEY_Device_LocationInfo", SPDRP_LOCATION_INFORMATION)
     )
     devices = []
 
@@ -247,10 +247,15 @@ def get_pci_devices():
             if not SetupDiGetDevicePropertyKeys(d_list, ctypes.byref(did), ctypes.byref(devpkeys), required_size.value, None, 0):
                 raise ctypes.WinError()'''
 
-        for p,n in props:
+        for p,n,f in props:
             prop = get_dev_property(d_list,did,p)
-            if not prop:
-                continue
+            if prop is None:
+                if f is None:
+                    continue
+                # Fall back if we can
+                prop = get_property(d_list,did,f)
+                if prop is None:
+                    continue
             if isinstance(prop,list):
                 prop = "{{{}}}".format(", ".join(prop))
             devices.append("{} {} {}".format(instance_id,n,prop))
