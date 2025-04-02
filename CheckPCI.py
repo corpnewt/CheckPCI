@@ -494,7 +494,6 @@ class CheckPCI:
                 rows = self.get_ps_entries(include_names=include_names,ps_output=ioreg_data)
             else:
                 # Unknown approach - just throw an error
-                print(ioreg_data[0:3])
                 raise Exception("Unknown ioreg type")
         except Exception as e:
             print("Failed to read '{}': {}".format(ioreg_override,e))
