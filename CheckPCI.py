@@ -99,13 +99,17 @@ class CheckPCI:
 
     def get_local_info(self):
         if os.name == "nt":
-            return self.r.run({
-                "args":[
-                    "powershell",
-                    "-c",
-                    r"Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI\\.*|ACPI\\PNP0A0(3|8)\\[^\\]*)'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_PciDevice_BaseClass,DEVPKEY_PciDevice_SubClass,DEVPKEY_PciDevice_ProgIf,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,KeyName,Data|Format-Table -Autosize|Out-String -width 9999"
-                ]
-            })[0].replace("\r","").strip().split("\n")
+            # Try the modern approach followed by the legacy approach
+            commands = (
+                r"""Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI|ACPI\\PNP0A0(3|8))\\[^\\]*'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_PciDevice_BaseClass,DEVPKEY_PciDevice_SubClass,DEVPKEY_PciDevice_ProgIf,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,KeyName,Data|Format-Table -Autosize|Out-String -width 9999""",
+                r"""Get-WmiObject -Class Win32_PnPEntity -Namespace 'root\CIMV2'|Where-Object{$_.PNPDeviceID -Match '^(PCI|ACPI\\PNP0A0(3|8))\\[^\\]*'}|Set-Variable -Name 'pciDevices';$i=0;$pciDevices|ForEach-Object{$i+=1;Try{Write-Progress -Activity "Processing PCI Devices" -Status "$i/$($pciDevices.Count): $($_.PNPDeviceID)" -PercentComplete (($i/$pciDevices.Count)*100)}Catch{};$_.GetDeviceProperties().DeviceProperties.Where({$_.KeyName -in @('DEVPKEY_Device_Parent','DEVPKEY_NAME','DEVPKEY_Device_LocationPaths','DEVPKEY_PciDevice_BaseClass','DEVPKEY_PciDevice_SubClass','DEVPKEY_PciDevice_ProgIf','DEVPKEY_Device_Address','DEVPKEY_Device_LocationInfo')})}|Select -Property DeviceID,KeyName,Data|Format-Table -Autosize|Out-String -Width 9999"""
+            )
+            for c in commands:
+                out = self.r.run({"args":["powershell","-c",c]})
+                if out[2] == 0:
+                    return out[0].replace("\r","").strip().split("\n")
+            # If we got here, both commands failed
+            return []
         else:
             return self.i.get_ioreg(plane="IODeviceTree")
 
