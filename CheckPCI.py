@@ -557,9 +557,10 @@ class CheckPCI:
                 "model":model,
                 "device_type":d_info.get("subclass") or d_info.get("class") or "Unknown Type"
             }
-            # Check for built-in and warn if not
+            # Check for built-in and warn if not - but only if
+            # we have an ACPI path
             try:
-                if r["row"][2] != "YES":
+                if not r["row"][3].startswith("Unknown ACPI") and r["row"][2] != "YES":
                     dev_props[p]["# WARNING - Not Built-in"]="Device properties may not take effect unless PCI bridges are defined in ACPI"
             except:
                 pass
