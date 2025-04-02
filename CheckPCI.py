@@ -1,5 +1,5 @@
 import os, sys, binascii, argparse, re
-from Scripts import ioreg, utils, run, plist
+from Scripts import ioreg, utils, run, plist, winpci
 
 class CheckPCI:
     def __init__(self):
@@ -99,6 +99,13 @@ class CheckPCI:
 
     def get_local_info(self):
         if os.name == "nt":
+            # Use our wrapper first
+            try:
+                pci = winpci.get_pci_devices()
+                assert pci
+                return pci.split("\n")
+            except:
+                pass
             # Try the modern approach followed by the legacy approach
             commands = (
                 r"""Get-PnpDevice -PresentOnly|Where-Object InstanceId -Match '^(PCI|ACPI\\PNP0A0(3|8))\\[^\\]*'|Get-PnpDeviceProperty -KeyName DEVPKEY_Device_Parent,DEVPKEY_NAME,DEVPKEY_Device_LocationPaths,DEVPKEY_PciDevice_BaseClass,DEVPKEY_PciDevice_SubClass,DEVPKEY_PciDevice_ProgIf,DEVPKEY_Device_Address,DEVPKEY_Device_LocationInfo|Select -Property InstanceId,KeyName,Data|Format-Table -Autosize|Out-String -width 9999""",
@@ -162,9 +169,9 @@ class CheckPCI:
             if key == "DEVPKEY_Device_LocationPaths":
                 # Got the location paths
                 try:
-                    paths = val.split("{")[1].split("}")[0].split(", ")
-                    dev_path = next((p for p in paths if p.startswith("PCIROOT(")),None)
-                    acpi_path = next((p for p in paths if p.startswith("ACPI(")),None)
+                    paths = val.lstrip("{").rstrip("}").split(", ")
+                    dev_path = next((p for p in paths if p.startswith("PCIROOT(")),"")
+                    acpi_path = next((p for p in paths if p.startswith("ACPI(")),"")
                     built_in = "YES" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "NO"
                     try: ven_id = dev.split("VEN_")[1][:4].lower()
                     except: ven_id = "????"
