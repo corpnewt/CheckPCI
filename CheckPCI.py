@@ -97,7 +97,10 @@ class CheckPCI:
             elif a.startswith("PCI("):
                 # This is abridge - just take note
                 acpi_comps.append("pci-bridge")
-        if not all(len(x)<=4 or x.startswith("pci-bridge") for x in acpi_comps):
+            elif a.startswith("PCIROOT("):
+                # This is a PCI root - just take note
+                acpi_comps.append("pci-root")
+        if not all(len(x)<=4 or x.startswith("pci-") for x in acpi_comps):
             # Broken somehow?
             return
         # Return the resulting path
@@ -149,24 +152,32 @@ class CheckPCI:
                 if not dev in pci_dict:
                     pci_dict[dev] = {}
                 # See if we got a path - or an address
-                if val.startswith("{"):
-                    # ACPI address - get the path
+                if key == "DEVPKEY_Device_LocationPaths":
+                    # ACPI address - get the path/name
                     try:
-                        pci_dict[dev]["acpi_path"] = val.split("(")[-1].split(")")[0]
+                        acpi = val.lstrip("{").rstrip("}").split(", ")[-1].split("#")[-1]
+                        if not acpi.startswith("ACPI("):
+                            continue # Botched value
+                        pci_dict[dev]["acpi_path"] = pci_dict[dev]["acpi_name"] = acpi.split("(")[1].split(")")[0]
                     except:
                         pass
-                else:
-                    # Try to convert it to a number - assume it's an address
+                elif key == "DEVPKEY_Device_Address":
+                    # Try to convert it to a number
                     try:
                         pci_dict[dev]["address"] = hex(int(val.strip()))[2:].upper()
+                        if not pci_dict[dev].get("acpi_path"):
+                            # Set a pci-root/bus placeholder
+                            name = "pci-root@" if "PNP0A08" in dev else "pci-bus@"
+                            pci_dict[dev]["acpi_path"] = name+pci_dict[dev]["address"]
                     except:
-                        # Not an int - skip it
-                        continue
-                # Check if we have both the acpi_path and address, and
+                        pass
+                # Check if we have the acpi_path, name, and address, and
                 # ensure the path reflects that
-                if all(x in pci_dict[dev] for x in ("acpi_path","address")) \
-                and not "@" in pci_dict[dev]["acpi_path"]:
-                    pci_dict[dev]["acpi_path"]+="@"+pci_dict[dev]["address"]
+                if all(x in pci_dict[dev] for x in ("acpi_path","acpi_name","address")):
+                    pci_dict[dev]["acpi_path"] = "{}@{}".format(
+                        pci_dict[dev]["acpi_path"].split("@")[0],
+                        pci_dict[dev]["address"]
+                    )
                 continue # Skip PCI checks
             # We must have a PCI entry
             if not dev in dev_dict:
@@ -178,7 +189,14 @@ class CheckPCI:
                     paths = val.lstrip("{").rstrip("}").split(", ")
                     dev_path = next((p for p in paths if p.startswith("PCIROOT(")),"")
                     acpi_path = next((p for p in paths if p.startswith("ACPI(")),"")
-                    built_in = "YES" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "NO"
+                    # Only check built_in if we have an ACPI path
+                    built_in = "???"
+                    if acpi_path:
+                        built_in = "YES" if all(x.startswith("ACPI(") for x in acpi_path.split("#")) else "NO"
+                    else:
+                        # Mirror the PCI path under _SB_ if no
+                        # ACPI path was located
+                        acpi_path = "ACPI(_SB_)#"+dev_path
                     try: ven_id = dev.split("VEN_")[1][:4].lower()
                     except: ven_id = "????"
                     try: dev_dict[dev]["vendor-id"] = int(ven_id,16)
@@ -214,7 +232,7 @@ class CheckPCI:
                                 if not addr:
                                     continue
                                 acpi_parts[i]+="@{}".format(addr)
-                        if acpi_parts[-1].startswith("pci-bridge@"):
+                        if acpi_parts[-1].startswith("pci-") and "@" in acpi_parts[-1]:
                             # We're a PCI bridge - save our ven,dev as well
                             pci_bridge = "pci{},{}@{}".format(
                                 ven_id,
@@ -565,7 +583,7 @@ class CheckPCI:
             # Check for built-in and warn if not - but only if
             # we have an ACPI path
             try:
-                if not r["row"][3].startswith("Unknown ACPI") and r["row"][2] != "YES":
+                if r["row"][2] == "NO":
                     dev_props[p]["# WARNING - Not Built-in"]="Device properties may not take effect unless PCI bridges are defined in ACPI"
             except:
                 pass
