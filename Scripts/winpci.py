@@ -77,9 +77,10 @@ DIGCF_ALLCLASSES      =  0x00000004
 DIGCF_PROFILE         =  0x00000008
 DIGCF_DEVICEINTERFACE =  0x00000010
 # Expected error
-ERROR_NO_MORE_ITEMS   = 259
+ERROR_INVALID_DATA        = 13
 ERROR_INSUFFICIENT_BUFFER = 122
-ERROR_ELEMENT_NOT_FOUND = 1168
+ERROR_NO_MORE_ITEMS       = 259
+ERROR_ELEMENT_NOT_FOUND   = 1168
 # Device Properties
 DEVPKEY_GUID = GUID(0xa45c254e, 0xdf1c, 0x4efd,
     (BYTE*8)(0x80, 0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0))
@@ -138,39 +139,43 @@ SPDRP_LOCATION_PATHS              = 0x00000023
 SPDRP_BASE_CONTAINERID            = 0x00000024
 SPDRP_MAXIMUM_PROPERTY            = 0x00000025
 
-def clean_buffer(buffer, step=1):
-    # Every other char is a null char - skip those,
-    # also replace any additional null chars with newlines
-    try:
-        if 2/3==0:
-            buffer_stripped = "".join(["\n" if x == b"\x00" else x for x in buffer.raw[::step]]).strip()
+def parse_data(arr, reg_data_type):
+    if reg_data_type in (7,-4,-3): # Number
+        return ctypes.wintypes.DWORD.from_buffer(arr).value
+    elif reg_data_type in (18, 8210, -1, -7): # String or String Array
+        if reg_data_type >= 0:
+            # Convert from char array to wchar_t array (halving size)
+            WArrType = ctypes.wintypes.WCHAR * (arr._length_ // ctypes.sizeof(ctypes.wintypes.WCHAR))
+            warr = WArrType.from_buffer(arr)   # @TODO - cfati: You should probably use MultiByteToWideChar or mbstowcs here.
+            ret = str(warr[:len(warr)]).rstrip("\x00")
         else:
-            buffer_stripped = "".join(["\n" if x == 0 else chr(x & 0xFF) for x in buffer.raw[::step]]).strip()
-    except:
-        return
-    # Depending on the null char ending count, we can adjust
-    # how we handle this data
-    if buffer_stripped.count("\n"):
-        return "{"+"{}".format(", ".join([x for x in buffer_stripped.split("\n")]))+"}"
-    return buffer_stripped
+            ret = arr.raw.decode(errors="ignore").rstrip("\x00")
+        if reg_data_type in (8210,-7): # String Array
+            return ret.split("\x00")
+        elif reg_data_type in (18,-1): # String
+            return ret.replace("\x00","")
+    else:
+        # More types could be handled here
+        return arr
 
 def get_property(d_list,did,spdrp_prop):
+    dproptype = ULONG()
     required_size = ULONG()
-    if not SetupDiGetDeviceRegistryProperty(d_list, ctypes.byref(did), spdrp_prop, None, None, 0, ctypes.byref(required_size)):
-        if ctypes.GetLastError() == ERROR_ELEMENT_NOT_FOUND:
+    if not SetupDiGetDeviceRegistryProperty(d_list, ctypes.byref(did), spdrp_prop, ctypes.byref(dproptype), None, 0, ctypes.byref(required_size)):
+        if ctypes.GetLastError() in (ERROR_ELEMENT_NOT_FOUND,ERROR_INVALID_DATA):
             # Didn't find it
             return None
         if ctypes.GetLastError() != ERROR_INSUFFICIENT_BUFFER:
             # Failed to get value
             raise ctypes.WinError()
         buffer = ctypes.create_string_buffer(required_size.value)
-        if not SetupDiGetDeviceRegistryProperty(d_list, ctypes.byref(did), spdrp_prop, None, ctypes.byref(buffer), required_size.value, None):
+        if not SetupDiGetDeviceRegistryProperty(d_list, ctypes.byref(did), spdrp_prop, ctypes.byref(dproptype), ctypes.byref(buffer), required_size.value, None):
             raise ctypes.WinError()
-        # Return the cleaned buffer
-        return clean_buffer(buffer)
+        # Return the cleaned value
+        return parse_data(buffer,-dproptype.value)
     return None
 
-def get_dev_property(d_list,did,devpkey,skip_clean=False):
+def get_dev_property(d_list,did,devpkey):
     dproptype = ULONG()
     required_size = ULONG()
     if not SetupDiGetDeviceProperty(d_list, ctypes.byref(did), devpkey, ctypes.byref(dproptype), None, 0, ctypes.byref(required_size), 0):
@@ -185,21 +190,19 @@ def get_dev_property(d_list,did,devpkey,skip_clean=False):
         if not SetupDiGetDeviceProperty(d_list, ctypes.byref(did), devpkey, ctypes.byref(dproptype), ctypes.byref(buffer), required_size.value, None, 0):
             raise ctypes.WinError()
         # Return the cleaned buffer
-        if skip_clean:
-            return buffer
-        return clean_buffer(buffer,step=2)
+        return parse_data(buffer,dproptype.value)
     return None
 
 def get_pci_devices():
     props = (
-        (False, DEVPKEY_Device_Parent,       "DEVPKEY_Device_Parent"),
-        (False, DEVPKEY_NAME,                "DEVPKEY_NAME"),
-        (False, DEVPKEY_Device_LocationPaths,"DEVPKEY_Device_LocationPaths"),
-        (True,  DEVPKEY_PciDevice_BaseClass, "DEVPKEY_PciDevice_BaseClass"),
-        (True,  DEVPKEY_PciDevice_SubClass,  "DEVPKEY_PciDevice_SubClass"),
-        (True,  DEVPKEY_PciDevice_ProgIf,    "DEVPKEY_PciDevice_ProgIf"),
-        (True,  DEVPKEY_Device_Address,      "DEVPKEY_Device_Address"),
-        (False, DEVPKEY_Device_LocationInfo, "DEVPKEY_Device_LocationInfo")
+        (DEVPKEY_Device_Parent,       "DEVPKEY_Device_Parent"),
+        (DEVPKEY_NAME,                "DEVPKEY_NAME"),
+        (DEVPKEY_Device_LocationPaths,"DEVPKEY_Device_LocationPaths"),
+        (DEVPKEY_PciDevice_BaseClass, "DEVPKEY_PciDevice_BaseClass"),
+        (DEVPKEY_PciDevice_SubClass,  "DEVPKEY_PciDevice_SubClass"),
+        (DEVPKEY_PciDevice_ProgIf,    "DEVPKEY_PciDevice_ProgIf"),
+        (DEVPKEY_Device_Address,      "DEVPKEY_Device_Address"),
+        (DEVPKEY_Device_LocationInfo, "DEVPKEY_Device_LocationInfo")
     )
     devices = []
 
@@ -213,7 +216,6 @@ def get_pci_devices():
     while True:
         if not SetupDiEnumDeviceInfo(d_list, index, ctypes.byref(did)):
             if ctypes.GetLastError() != ERROR_NO_MORE_ITEMS:
-                # print(ctypes.GetLastError())
                 raise ctypes.WinError()
             break
         index += 1
@@ -229,8 +231,8 @@ def get_pci_devices():
             if not SetupDiGetDeviceInstanceId(d_list, ctypes.byref(did), ctypes.byref(buffer), required_size.value, None):
                 raise ctypes.WinError()
                 continue
-            # Return the cleaned buffer
-            instance_id = clean_buffer(buffer)
+            # Resolve the instance id
+            instance_id = parse_data(buffer,-1)
         if not instance_id or not prop_check.match(instance_id):
             continue
 
@@ -245,12 +247,12 @@ def get_pci_devices():
             if not SetupDiGetDevicePropertyKeys(d_list, ctypes.byref(did), ctypes.byref(devpkeys), required_size.value, None, 0):
                 raise ctypes.WinError()'''
 
-        for s,p,n in props:
-            prop = get_dev_property(d_list,did,p,skip_clean=s)
-            if not prop: continue
-            if s:
-                # Skipped cleaning - convert to an integer
-                prop = struct.unpack_from("H",prop)[0]
+        for p,n in props:
+            prop = get_dev_property(d_list,did,p)
+            if not prop:
+                continue
+            if isinstance(prop,list):
+                prop = "{{{}}}".format(", ".join(prop))
             devices.append("{} {} {}".format(instance_id,n,prop))
     if devices:
         devices = ["InstanceId KeyName Data"]+devices
