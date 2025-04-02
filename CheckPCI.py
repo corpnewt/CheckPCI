@@ -1,9 +1,11 @@
 import os, sys, binascii, argparse, re
 from Scripts import ioreg, utils, run, plist
-try:
-    from Scripts import winpci
-except (ImportError, AttributeError):
-    pass
+if os.name == "nt":
+    # Only try to import on Windows
+    try:
+        from Scripts import winpci
+    except (ImportError, AttributeError):
+        pass
 
 class CheckPCI:
     def __init__(self):
