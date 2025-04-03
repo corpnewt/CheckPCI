@@ -161,6 +161,13 @@ class CheckPCI:
                         pci_dict[dev]["acpi_path"] = pci_dict[dev]["acpi_name"] = acpi.split("(")[1].split(")")[0]
                     except:
                         pass
+                elif key == "DEVPKEY_Device_Parent":
+                    # We should be able to scrape the address from the 
+                    # parent path.  Formatted like: ACPI_HAL\PNP0C08\0
+                    try:
+                        pci_dict[dev]["address"] = hex(int(val.strip().split("\\")[-1]))[2:].upper()
+                    except:
+                        pass
                 elif key == "DEVPKEY_Device_Address":
                     # Try to convert it to a number
                     try:
