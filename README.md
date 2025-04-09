@@ -5,6 +5,7 @@ Py script to list PCI devices detected in ioreg.
 
 ```
 usage: CheckPCI.py [-h] [-f FIND_NAME] [-n] [-i LOCAL_IOREG] [-c COLUMN_LIST] [-m [COLUMN_MATCH ...]] [-o OUTPUT_FILE]
+                   [-p SAVE_PLIST] [-u]
 
 CheckPCI - a py script to list PCI device info from the IODeviceTree.
 
@@ -14,14 +15,18 @@ options:
                         find device paths for objects with the passed name from the IODeviceTree
   -n, --include-names   include friendly names for devices where applicable
   -i, --local-ioreg LOCAL_IOREG
-                        path to local ioreg/powershell dump to leverage
+                        path relative to this script for local ioreg/powershell to leverage
   -c, --column-list COLUMN_LIST
                         comma delimited list of numbers representing which columns to display. Options are: 1 -
                         PCIDBG, 2 - VEN:DEV, 3 - Built-In, 4 - ACPI, 5 - Device
   -m, --column-match [COLUMN_MATCH ...]
                         match entry formatted as NUM=VAL. e.g. To match all devices that aren't built-in: -m 3=NO
   -o, --output-file OUTPUT_FILE
-                        dump the current machine's ioreg/powershell info to the provided path and exit
+                        dump the current machine's ioreg/powershell info to the provided path relative to this script
+                        and exit
+  -p, --save-plist SAVE_PLIST
+                        dump all detected PCI devices to the provided path relative to this script and exit
+  -u, --update-pci-ids  download the latest pci.ids.gz file from https://pci-ids.ucw.cz and exit
 ```
 
 ***
