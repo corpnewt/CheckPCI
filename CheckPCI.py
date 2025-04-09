@@ -409,9 +409,11 @@ class CheckPCI:
                 }
             })
             if include_names:
-                rows[-1]["row"].append(
-                    p.get("friendly_name","")
-                )
+                # Try to use the pci.ids(.gz) info first for consistency,
+                # fall back on anything scraped from the PCI output after
+                d_info = self.i.get_device_info_from_pci_ids(p)
+                name = p.get("friendly_name","") if not d_info or not d_info.get("device") else d_info["device"]
+                rows[-1]["row"].append(name)
         return rows
 
     def get_row(self, row, column_list=None):
@@ -698,8 +700,13 @@ if __name__ == '__main__':
     parser.add_argument("-m", "--column-match", help="match entry formatted as NUM=VAL.  e.g. To match all devices that aren't built-in: -m 3=NO",action="append",nargs="*")
     parser.add_argument("-o", "--output-file", help="dump the current machine's ioreg/powershell info to the provided path relative to this script and exit")
     parser.add_argument("-p", "--save-plist", help="dump all detected PCI devices to the provided path relative to this script and exit")
+    parser.add_argument("-u", "--update-pci-ids", help="download the latest pci.ids.gz file from https://pci-ids.ucw.cz and exit",action="store_true")
 
     args = parser.parse_args()
+
+    # Try to ensure we have the pci.ids(.gz) file
+    if any((args.save_plist,args.include_names)):
+        p.i._update_pci_ids_if_missing(quiet=False)
 
     if args.output_file:
         # Change to this directory for relative pathing
@@ -737,6 +744,15 @@ if __name__ == '__main__':
             print("Failed to save: {}".format(e))
             exit(1)
         print("Saved plist data to '{}'".format(args.save_plist))
+        exit()
+
+    if args.update_pci_ids:
+        # Change to this directory for relative pathing - not currently used
+        os.chdir(os.path.dirname(os.path.realpath(__file__)))
+        # Download the target file
+        saved_file = p.i._update_pci_ids(quiet=False)
+        if not saved_file or not os.path.isfile(saved_file):
+            exit(1)
         exit()
 
     columns = None

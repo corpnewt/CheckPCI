@@ -6,8 +6,10 @@ class IOReg:
         self.ioreg = {}
         self.pci_devices = []
         self.r = run.Run()
+        self.d = None # Placeholder
         # Placeholder for a local pci.ids file.  You can get it from: https://pci-ids.ucw.cz/
         # and place it next to this file
+        self.pci_ids_url = "https://pci-ids.ucw.cz"
         self.pci_ids = {}
 
     def _get_hex_addr(self,item):
@@ -102,6 +104,67 @@ class IOReg:
                 # Failed - reset
                 self.pci_devices = []
         return self.pci_devices
+
+    def _update_pci_ids_if_missing(self, quiet=True):
+        # Checks for the existence of pci.ids or pci.ids.gz - and attempts
+        # to download the latest if none is found.
+        pci_ids_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),"pci.ids")
+        pci_ids_gz_path = pci_ids_path+".gz"
+        found = next((x for x in (pci_ids_path,pci_ids_gz_path) if os.path.isfile(x)),None)
+        if found:
+            return found
+        # Not found - try to update
+        return self._update_pci_ids(quiet=quiet)
+
+    def _update_pci_ids(self, quiet=True):
+        if self.d is None:
+            try:
+                # Only initialize if we're actually using it
+                from . import downloader
+                self.d = downloader.Downloader()
+            except:
+                return None
+        def qprint(text):
+            if quiet: return
+            print(text)
+        qprint("Gathering latest info from {}...".format(self.pci_ids_url))
+        try:
+            _html = self.d.get_string(self.pci_ids_url,progress=False)
+            assert _html
+        except:
+            qprint(" - Something went wrong")
+            return None
+        # Try to scrape for the .gz compressed download link
+        qprint("Locating download URL...")
+        dl_url = None
+        for line in _html.split("\n"):
+            if ">pci.ids.gz</a>" in line:
+                # Got it - build the URL
+                try:
+                    dl_url = "/".join([
+                        self.pci_ids_url.rstrip("/"),
+                        line.split('"')[1].lstrip("/")
+                    ])
+                    break
+                except:
+                    continue
+        if not dl_url:
+            qprint(" - Not located")
+            return None
+        # Got a download URL - let's actually download it
+        qprint(" - {}".format(dl_url))
+        qprint("Downloading {}...".format(os.path.basename(dl_url)))
+        target_path = os.path.join(os.path.dirname(os.path.realpath(__file__)),os.path.basename(dl_url))
+        try:
+            saved_file = self.d.stream_to_file(dl_url,target_path,progress=not quiet)
+        except:
+            qprint(" - Something went wrong")
+            return None
+        if os.path.isfile(target_path):
+            qprint("\nSaved to: {}".format(target_path))
+            return target_path
+        qprint("Download failed.")
+        return None
 
     def _get_pci_ids_dict(self, force=False):
         if self.pci_ids and not force:
