@@ -476,7 +476,7 @@ class CheckPCI:
             except:
                 pass
             builtin = "NO"
-            if "built-in" in p_dict or "IOBuiltin" in p_dict or p_dict.get("acpi-path"):
+            if p_dict.get("acpi-path"):
                 builtin = "YES"
             acpi = p.get("acpi_path","Unknown ACPI Path")
             device = p.get("device_path","Unknown Device Path")
