@@ -35,7 +35,7 @@ options:
 
 * `PCIDBG` - this shows the hexadecimal bus, device, and function addresses for the PCI device using the format `BB:DD.F`.  These are pulled and converted from the `pcidebug` property.
 * `VEN:DEV` - this is the hexadecimal vendor and device ids of the device.
-* `Built-In` - a `YES` or `NO` value denoting whether the device has the `built-in` or `IOBuiltin` property, or that all elements of the device path are defined in ACPI.
+* `Built-In` - a `YES` or `NO` value denoting whether all elements of the device path are defined in ACPI or not.  In order for `DeviceProperties` defined in the config.plist to inject early enough to take effect, this must be `YES` - which may require defining missing PCI bridges in ACPI.
 * `ACPI+DevicePaths` - the ACPI or device paths corresponding to the PCI device.  The ACPI paths lack the `_SB` or `_PR` entry, and may not be accurate due to the potential for renamed devices.
 
 ***
