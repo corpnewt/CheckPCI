@@ -2,6 +2,13 @@
 Py script to list PCI devices detected in ioreg.
 
 ***
+### Installation
+#### Macos and Linux
+```
+git clone https://github.com/corpnewt/CheckPCI
+cd ./CheckPCI
+chmod +x ./CheckPCI.command
+```
 
 ```
 usage: CheckPCI.py [-h] [-f FIND_NAME] [-n] [-i LOCAL_IOREG] [-c COLUMN_LIST] [-m [COLUMN_MATCH ...]] [-o OUTPUT_FILE]
